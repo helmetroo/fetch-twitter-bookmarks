@@ -1,0 +1,35 @@
+{
+    "name": "extract-twitter-bookmarks",
+    "version": "0.0.0",
+    "description": "A utility to scrape saved bookmarks from Twitter",
+    "main": "src/main.ts",
+    "scripts": {
+        "start": "ts-node src/main.ts",
+        "debug": "node --inspect -r ts-node/register src/main.ts",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [
+        "saved",
+        "crawler",
+        "bookmarks"
+    ],
+    "author": "Samuel Sweet <samueljsweet@gmail.com>",
+    "license": "ISC",
+    "dependencies": {
+        "cli-progress": "^2.1.1",
+        "minimist": "^1.2.0",
+        "puppeteer": "^1.17.0"
+    },
+    "devDependencies": {
+        "@types/cli-progress": "^1.8.1",
+        "@types/minimist": "^1.2.0",
+        "@types/node": "^12.0.7",
+        "@types/puppeteer": "^1.12.4",
+        "ts-node": "^8.2.0",
+        "typescript": "^3.5.1"
+    },
+    "engines": {
+        "node": ">=8.x",
+        "npm": ">=6.x"
+    }
+}
