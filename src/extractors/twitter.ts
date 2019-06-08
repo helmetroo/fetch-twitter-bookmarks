@@ -55,13 +55,15 @@ class TwitterExtractor extends ProgressEventEmitter {
         await twitterLogin.goto('https://mobile.twitter.com/login');
         this.emitProgressEvent(this.TWITTER_PAGE);
 
-        await this.login(twitterLogin);
+        await TwitterExtractor.login(twitterLogin, this.credentials);
         this.emitProgressEvent(this.LOGIN);
 
-        await twitterLogin.goto('https://mobile.twitter.com/i/bookmarks');
+        await twitterLogin.goto('https://mobile.twitter.com/i/bookmarks', {
+            waitUntil: 'load'
+        });
         this.emitProgressEvent(this.BOOKMARKED_TWEETS_PAGE);
 
-        await this.scrapeBookmarks(twitterLogin);
+        await TwitterExtractor.extractTweetsFromPage(twitterLogin);
         this.emitProgressEvent(this.BOOKMARKED_TWEETS_EXTRACT);
 
         await this.browser.close();
@@ -83,7 +85,7 @@ class TwitterExtractor extends ProgressEventEmitter {
         });
     }
 
-    protected async login(twitterLogin: Page) {
+    protected static async login(twitterLogin: Page, credentials: UsernamePasswordCredentials) {
         const loginForm = await twitterLogin.waitForSelector('form[action="/sessions"]');
 
         const maybeLoginFormFields = await TwitterExtractor.getLoginFormFields(loginForm);
@@ -93,8 +95,13 @@ class TwitterExtractor extends ProgressEventEmitter {
                 passwordField
             } = loginFormFields;
 
-            await this.enterCredentialInField(this.credentials.username, usernameField);
-            await this.enterCredentialInField(this.credentials.password, passwordField);
+            const {
+                username,
+                password
+            } = credentials;
+
+            await TwitterExtractor.enterCredentialInField(username, usernameField);
+            await TwitterExtractor.enterCredentialInField(password, passwordField);
 
             const submitButton = await loginForm.$('[role="button"]');
             await submitButton!.click();
@@ -108,43 +115,74 @@ class TwitterExtractor extends ProgressEventEmitter {
         });
     }
 
-    protected async enterCredentialInField(credential: string, credentialField: ElementHandle<any>) {
+    protected static async enterCredentialInField(credential: string, credentialField: ElementHandle<any>) {
         await credentialField.focus();
         await credentialField.type(credential, {
             delay: 100
         });
     }
 
-    protected async scrapeBookmarks(bookmarks: Page) {
-        const tweetContainer = await bookmarks.waitForSelector('article');
-        await this.extractTweetFromContainer(tweetContainer);
+    protected static async extractTweetsFromPage(bookmarks: Page) {
+        await bookmarks.waitForSelector('article');
+
+        let tweets: (Tweet | null)[] = [];
+        let previousHeight = 0;
+        let canContinueScrolling = true;
+        while(canContinueScrolling) {
+            const existingArticles = await bookmarks.$$('article');
+            const tweetExtractions =
+                existingArticles.map(TwitterExtractor.extractTweetFromContainer);
+            tweets = await Promise.all(tweetExtractions);
+
+            previousHeight = await bookmarks.evaluate('document.body.scrollHeight');
+            await bookmarks.evaluate('window.scrollTo(0, document.body.scrollHeight)');
+            try {
+                await bookmarks.waitForFunction(`document.body.scrollHeight > ${previousHeight}`);
+            } catch(err) {
+                canContinueScrolling = false;
+                break;
+            }
+
+            await bookmarks.waitFor(1000);
+        }
+
+        tweets = tweets.reduce((collectedTweets, currentTweet) => {
+            if(isNil(currentTweet))
+                return collectedTweets;
+
+            collectedTweets.push(currentTweet);
+            return collectedTweets;
+        }, <Tweet[]> []);
+        return tweets;
     }
 
-    protected async extractTweetFromContainer(articleContainer: ElementHandle<any>) {
-        const maybeArticleTweet = Maybe.fromValue(await articleContainer.$('div[data-testid="tweet"]'));
-        await maybeArticleTweet.mapAsync(async (articleTweet) => {
-            const tweetLinks =
-                await articleTweet!.$$('a');
+    protected static async extractTweetFromContainer(articleContainer: ElementHandle<any>) {
+        const articleTweet = await articleContainer.$('div[data-testid="tweet"]');
+        if(isNil(articleTweet))
+            return null;
 
-            const tweetHrefs =
-                tweetLinks.map((link) => (link as unknown as Link).href);
+        // TS treats return of $$eval as ElementHandle<string[]>, but we know this really gives us a string[]
+        const tweetHrefs: string[] =
+            await articleTweet.$$eval(
+                'a',
+                links => links.map(link => (link as unknown as Link).href)
+            ) as unknown as string[];
 
-            const [
-                profileLink,
-                _,
-                tweetLink,
-                embeddedLink
-            ] = tweetHrefs;
+        const [
+            profileLink,
+            _,
+            tweetLink,
+            embeddedLink
+        ] = tweetHrefs;
 
-            const tweet = {
-                profile: profileLink,
-                tweet: tweetLink,
-                link: embeddedLink
-            };
+        const tweet: Tweet = {
+            profile: profileLink,
+            tweet: tweetLink,
+            link: embeddedLink
+        };
 
-            console.log(tweet);
-            return tweet;
-        });
+        console.log(tweet);
+        return tweet;
     }
 }
 
