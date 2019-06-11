@@ -17,12 +17,11 @@ export default class ProgressBar {
 
     protected updateProgress(eventName: string) {
         ++this.achievedEvents;
-        console.log(eventName);
         this.progressBar.update(this.achievedEvents);
     } 
 
     public stopWatching() {
         this.progressBar.stop();
-        this.watchable.off('progress', this.updateProgress);
+        this.watchable.off('progress', this.updateProgress.bind(this));
     }
 }

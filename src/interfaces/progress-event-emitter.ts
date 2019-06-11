@@ -13,5 +13,5 @@ export default abstract class ProgressEventEmitter extends EventEmitter {
 
     protected emitProgressEvent(eventName: string) {
         this.emit('progress', eventName);
-    }
+    } 
 }

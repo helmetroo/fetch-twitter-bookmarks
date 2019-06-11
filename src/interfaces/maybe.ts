@@ -17,7 +17,7 @@ export default class Maybe<T> {
         return new Maybe<T>(null);
     }
 
-    static fromValue<T>(value: T) {
+    static fromValue<T>(value: T | Nil) {
         return isNil(value)
             ? Maybe.none<T>()
             : Maybe.some(value);

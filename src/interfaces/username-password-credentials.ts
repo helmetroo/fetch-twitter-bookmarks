@@ -1,6 +1,4 @@
-import { ParsedArgs } from 'minimist';
-
-export default interface UsernamePasswordCredentials extends ParsedArgs {
+export default interface UsernamePasswordCredentials {
     username: string;
     password: string;
 }
