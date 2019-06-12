@@ -311,19 +311,24 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
     protected static async extractTweetText(articleTweet: ElementHandle<Element>) {
         let tweetTexts: string[] = [];
         try {
-            tweetTexts =
-                await articleTweet.$$eval(
-                    'div[lang="en"] > span',
-                    spans => spans.map(
-                        span => {
-                            const textSpan = (span as unknown as HTMLSpanElement);
+            const tweetTextContainer = await articleTweet.$('div[lang]');
+            if(isNil(tweetTextContainer))
+                return '';
 
-                            const text = textSpan.textContent;
+            tweetTexts =
+                await tweetTextContainer.$$eval(
+                    'div[lang] > *',
+                    blocks => blocks.map(
+                        block => {
+                            const textBlock = (block as unknown as HTMLElement);
+
+                            const text = textBlock.textContent;
                             if(!text) {
-                                const emojiDiv = Maybe.fromValue(textSpan.querySelector('div'));
+                                const emojiDiv = Maybe.fromValue(textBlock.querySelector('div'));
                                 const emojiText = emojiDiv
                                     .map(div => div.getAttribute('aria-label'))
                                     .getOrElse('');
+                                return emojiText;
                             }
 
                             return text;
@@ -332,7 +337,7 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
                 ) as unknown as string[];
         } catch(err) {}
 
-        const tweetText = tweetTexts.join(' ');
+        const tweetText = tweetTexts.join('');
         return tweetText;
     }
 
