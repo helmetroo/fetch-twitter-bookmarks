@@ -3,14 +3,14 @@ import { parse as urlParse } from 'url';
 
 import { Browser, ElementHandle, Page } from 'puppeteer';
 
-import UsernamePasswordCredentials from '../interfaces/username-password-credentials';
-import ProgressEventEmitter from '../interfaces/progress-event-emitter';
-import Link from '../interfaces/link';
-import Maybe, { isNil } from '../interfaces/maybe';
+import UsernamePasswordCredentials from './interfaces/username-password-credentials';
+import ProgressEventEmitter from './interfaces/progress-event-emitter';
+import Link from './interfaces/link';
+import Maybe, { isNil } from './interfaces/maybe';
 
 type CredentialFields = {
-    usernameField: ElementHandle<any>,
-    passwordField: ElementHandle<any>
+    usernameField: ElementHandle<Element>,
+    passwordField: ElementHandle<Element>
 }
 
 interface Tweet {
@@ -36,7 +36,7 @@ export interface TwitterExtractorOptions {
     newTab: boolean
 }
 
-class TwitterExtractor extends ProgressEventEmitter {
+class TwitterBookmarkExtractor extends ProgressEventEmitter {
     protected readonly PAGE_NEW: string = 'page:new';
     protected readonly TWITTER_PAGE: string = 'twitter:page';
     protected readonly LOGIN: string = 'login';
@@ -75,7 +75,7 @@ class TwitterExtractor extends ProgressEventEmitter {
             await this.resolveBookmarksPage(newPage, this.options.newTab);
 
         const tweets =
-            await TwitterExtractor.extractTweetsFromPage(this.bookmarksPage!, this.options.maxLimit);
+            await TwitterBookmarkExtractor.extractTweetsFromPage(this.bookmarksPage!, this.options.maxLimit);
         this.emitProgressEvent(this.BOOKMARKED_TWEETS_EXTRACT_COMPLETE);
 
         return tweets;
@@ -103,7 +103,7 @@ class TwitterExtractor extends ProgressEventEmitter {
             this.emitProgressEvent(this.TWITTER_PAGE);
         }
 
-        await TwitterExtractor.login(page, this.credentials);
+        await TwitterBookmarkExtractor.login(page, this.credentials);
         this.emitProgressEvent(this.LOGIN);
     }
 
@@ -115,7 +115,7 @@ class TwitterExtractor extends ProgressEventEmitter {
         this.emitProgressEvent(this.FINISH);
     }
 
-    protected static async getLoginFormFields(loginForm: ElementHandle<any>) {
+    protected static async getLoginFormFields(loginForm: ElementHandle<Element>) {
         const usernameField = await loginForm.$('input[name="session[username_or_email]"]');
         if(isNil(usernameField))
             return Maybe.none<CredentialFields>();
@@ -133,7 +133,8 @@ class TwitterExtractor extends ProgressEventEmitter {
     protected static async login(twitterLogin: Page, credentials: UsernamePasswordCredentials) {
         const loginForm = await twitterLogin.waitForSelector('form[action="/sessions"]');
 
-        const maybeLoginFormFields = await TwitterExtractor.getLoginFormFields(loginForm);
+        const maybeLoginFormFields =
+            await TwitterBookmarkExtractor.getLoginFormFields(loginForm);
         await maybeLoginFormFields.mapAsync(async (loginFormFields) => {
             const {
                 usernameField,
@@ -145,22 +146,28 @@ class TwitterExtractor extends ProgressEventEmitter {
                 password
             } = credentials;
 
-            await TwitterExtractor.enterCredentialInField(username, usernameField);
-            await TwitterExtractor.enterCredentialInField(password, passwordField);
+            await TwitterBookmarkExtractor
+                .enterCredentialInField(username, usernameField);
+            await TwitterBookmarkExtractor
+                .enterCredentialInField(password, passwordField);
 
             const submitButton = await loginForm.$('[role="button"]');
-            await submitButton!.click();
+            await submitButton!.click(); // Sometimes fails
             await twitterLogin.waitForNavigation();
 
             const currentUrl = twitterLogin.url();
-            const loginFailed = currentUrl.includes('https://mobile.twitter.com/login/error');
+            const loginFailed = currentUrl
+                .includes('https://mobile.twitter.com/login/error');
             if(loginFailed) {
                 throw new Error('Incorrect credentials.');
             }
         });
     }
 
-    protected static async enterCredentialInField(credential: string, credentialField: ElementHandle<any>) {
+    protected static async enterCredentialInField(
+        credential: string,
+        credentialField: ElementHandle<Element>
+    ) {
         await credentialField.focus();
         await credentialField.type(credential, {
             delay: 100
@@ -175,50 +182,80 @@ class TwitterExtractor extends ProgressEventEmitter {
             return <Tweet[]> [];
         }
 
-        let collectedTweets: Tweet[] = [];
-        let previousHeight = 0;
+        let tweets: Tweet[] = [];
         let canContinueScrolling = true;
-        while(canContinueScrolling) {
+        let lastMaxHeight = 0;
+        let currentPage = 1;
+        while(true) {
             const tweetContainers = await bookmarks.$$('article');
-            const currentCollectedTweets: Tweet[] = [];
-            for(const container of tweetContainers) {
-                try {
-                    const tweet =
-                        await TwitterExtractor.extractTweetFromContainer(container);
-                    currentCollectedTweets.push(tweet);
-                } catch(err) {
-                    console.warn(err.message);
-                    continue;
-                }
+            if(tweetContainers.length === 0) {
+                break;
             }
-            collectedTweets =
-                collectedTweets.concat(currentCollectedTweets);
+
+            await TwitterBookmarkExtractor
+                .clearExtractedsFromBrowser(bookmarks, currentPage);
+
+            const currentCollectedTweets =
+                await TwitterBookmarkExtractor
+                .extractTweetsFromContainers(tweetContainers);
+            tweets = tweets.concat(currentCollectedTweets);
 
             const definedLimit = (maxLimit !== Number.POSITIVE_INFINITY);
             const reachedLimit = definedLimit
-                && (collectedTweets.length >= maxLimit);
+                && (tweets.length >= maxLimit);
             if(reachedLimit) {
-                collectedTweets = collectedTweets.slice(0, maxLimit);
-                canContinueScrolling = false;
+                tweets = tweets.slice(0, maxLimit);
                 break;
             }
 
-            previousHeight = await bookmarks.evaluate('document.body.scrollHeight');
-            await bookmarks.evaluate('window.scrollTo(0, document.body.scrollHeight)');
-            try {
-                await bookmarks.waitForFunction(`document.body.scrollHeight > ${previousHeight}`);
-            } catch(err) {
-                canContinueScrolling = false;
-                break;
-            }
+            await TwitterBookmarkExtractor
+                .markExtractedsFromBrowser(bookmarks, currentPage);
 
+            lastMaxHeight =
+                await bookmarks.evaluate(() => document.body.scrollHeight);
+            const currentScrollProgress = await TwitterBookmarkExtractor
+                .scrollForMoreTweets(bookmarks);
+            const stopScrolling =
+                await bookmarks.evaluate(({lastMaxHeight, currentScrollProgress}) => {
+                    const currentMaxHeight = document.body.scrollHeight;
+                    const currentMaxLessThanLast =
+                        currentMaxHeight <= lastMaxHeight;
+
+                    const currentHeightMoreThanCurrentMax =
+                        currentScrollProgress >= currentMaxHeight;
+
+                    return currentMaxLessThanLast && currentHeightMoreThanCurrentMax;
+                }, {
+                    timeout: 2000
+                }, {lastMaxHeight, currentScrollProgress});
+
+            if(stopScrolling)
+                break;
+
+            ++currentPage;
             await bookmarks.waitFor(1000);
         }
 
-        return collectedTweets;
+        return tweets;
     }
 
-    protected static async extractTweetFromContainer(articleContainer: ElementHandle<any>) {
+    protected static async extractTweetsFromContainers(tweetContainers: ElementHandle<Element>[]) {
+        const currentCollectedTweets: Tweet[] = [];
+        for(const container of tweetContainers) {
+            try {
+                const tweet =
+                    await TwitterBookmarkExtractor.extractTweetFromContainer(container);
+                currentCollectedTweets.push(tweet);
+            } catch(err) {
+                console.warn(err.message);
+                continue;
+            }
+        }
+
+        return currentCollectedTweets;
+    }
+
+    protected static async extractTweetFromContainer(articleContainer: ElementHandle<Element>) {
         const articleTweet = await articleContainer.$('div[data-testid="tweet"]');
         if(isNil(articleTweet)) {
             const noTweetContainer = new Error('Could not find tweet container for current tweet. Skipping...');
@@ -226,16 +263,16 @@ class TwitterExtractor extends ProgressEventEmitter {
         }
 
         const tweetLinks =
-            await TwitterExtractor.extractTweetLinks(articleTweet);
+            await TwitterBookmarkExtractor.extractTweetLinks(articleTweet);
         const profileUrl = urlParse(tweetLinks.toProfile);
         const profile = Maybe.fromValue(profileUrl.path)
             .getOrElse(' ').substr(1);
 
         const tweetText =
-            await TwitterExtractor.extractTweetText(articleTweet);
+            await TwitterBookmarkExtractor.extractTweetText(articleTweet);
 
         const tweetMedia =
-            await TwitterExtractor.extractTweetMedia(articleTweet);
+            await TwitterBookmarkExtractor.extractTweetMedia(articleTweet);
 
         const tweet: Tweet = {
             profile,
@@ -247,7 +284,7 @@ class TwitterExtractor extends ProgressEventEmitter {
         return tweet;
     }
 
-    protected static async extractTweetLinks(articleTweet: ElementHandle<any>): Promise<TweetLinks> {
+    protected static async extractTweetLinks(articleTweet: ElementHandle<Element>): Promise<TweetLinks> {
         // TS treats return of $$eval as ElementHandle<string[]>, but we know this really gives us a string[]
         const tweetHrefs =
             await articleTweet.$$eval(
@@ -269,7 +306,7 @@ class TwitterExtractor extends ProgressEventEmitter {
         };
     }
 
-    protected static async extractTweetText(articleTweet: ElementHandle<any>): Promise<string> {
+    protected static async extractTweetText(articleTweet: ElementHandle<Element>) {
         let tweetTexts: string[] = [];
         try {
             tweetTexts =
@@ -281,7 +318,6 @@ class TwitterExtractor extends ProgressEventEmitter {
 
                             const text = textSpan.textContent;
                             if(!text) {
-                                // Emoji image. The alt attribute has the actual emoji
                                 const emojiDiv = Maybe.fromValue(textSpan.querySelector('div'));
                                 const emojiText = emojiDiv
                                     .map(div => div.getAttribute('aria-label'))
@@ -298,7 +334,7 @@ class TwitterExtractor extends ProgressEventEmitter {
         return tweetText;
     }
 
-    protected static async extractTweetMedia(articleTweet: ElementHandle<any>): Promise<TweetMedia> {
+    protected static async extractTweetMedia(articleTweet: ElementHandle<Element>) {
         let tweetImageHrefs: string[] = [];
         try {
             tweetImageHrefs = await articleTweet.$$eval(
@@ -315,13 +351,44 @@ class TwitterExtractor extends ProgressEventEmitter {
             ) as unknown as string;
         } catch(err) {}
 
-        const tweetMedia = {
+        const tweetMedia: TweetMedia = {
             images: tweetImageHrefs,
             video: tweetVideoHref
         };
 
         return tweetMedia;
     }
+
+    protected static async clearExtractedsFromBrowser(bookmarks: Page, page: number) {
+        const toBeErased = `REMOVEME_${page - 1}`;
+        await bookmarks.$$eval(`.${toBeErased}`, (elementsToErase) => {
+            elementsToErase.forEach(element => element.remove());
+        });
+    }
+
+    protected static async markExtractedsFromBrowser(bookmarks: Page, page: number) {
+        await bookmarks.evaluate(({ page }) => {
+            const toBeMarked = `REMOVEME_${page}`;
+            const articleElements = document.querySelectorAll('article');
+            Array.from(articleElements).forEach(element => {
+                element.className = toBeMarked;
+            });
+        }, { page });
+    }
+
+    protected static async scrollForMoreTweets(bookmarks: Page) {
+        return bookmarks.evaluate(() => {
+            // We need to scroll only a bit at a time to catch all the elements.
+            // We can't scroll by document.body.scrollHeight as we miss elements this way.
+            // Is there a better way?
+            const _window = <any> window;
+            _window['te_currentScrollHeight'] = _window['te_currentScrollHeight'] || 0;
+            _window['te_currentScrollHeight'] += document.documentElement.clientHeight;
+            window.scrollTo(0, _window['te_currentScrollHeight']);
+
+            return _window['te_currentScrollHeight'];
+        });
+    }
 }
 
-export default TwitterExtractor;
+export default TwitterBookmarkExtractor;

@@ -8,7 +8,7 @@ import {
 import puppeteer, { LaunchOptions as PuppeteerLaunchOptions } from 'puppeteer';
 import minimist from 'minimist';
 
-import TwitterExtractor, { TwitterExtractorOptions } from './extractors/twitter';
+import TwitterBookmarkExtractor, { TwitterExtractorOptions } from './extractor';
 import CommandLineArgs from './interfaces/command-line-args';
 import UsernamePasswordCredentials from './interfaces/username-password-credentials';
 
@@ -58,7 +58,7 @@ import ProgressBar from './progress-bar';
         }
 
         const browser = await puppeteer.launch(puppeteerOptions);
-        const te = new TwitterExtractor(browser, credentials, options);
+        const te = new TwitterBookmarkExtractor(browser, credentials, options);
         const pb = new ProgressBar(te);
 
         pb.startWatching();
