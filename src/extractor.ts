@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { parse as urlParse } from 'url';
 
 import { Browser, ElementHandle, Page } from 'puppeteer';
+import { uniqWith, isEqual } from 'lodash';
 
 import UsernamePasswordCredentials from './interfaces/username-password-credentials';
 import ProgressEventEmitter from './interfaces/progress-event-emitter';
@@ -236,6 +237,7 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
             await bookmarks.waitFor(1000);
         }
 
+        tweets = uniqWith(tweets, isEqual);
         return tweets;
     }
 
