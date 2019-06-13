@@ -17,6 +17,7 @@
     "license": "ISC",
     "dependencies": {
         "cli-progress": "^2.1.1",
+        "immutable": "^4.0.0-rc.12",
         "lodash": "^4.17.11",
         "minimist": "^1.2.0",
         "puppeteer": "^1.17.0"

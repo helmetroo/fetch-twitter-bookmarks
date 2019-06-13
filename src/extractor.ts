@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { parse as urlParse } from 'url';
 
 import { Browser, ElementHandle, Page } from 'puppeteer';
-import { uniqWith, isEqual } from 'lodash';
+import { OrderedSet, Map, List, fromJS } from 'immutable';
 
 import UsernamePasswordCredentials from './interfaces/username-password-credentials';
 import ProgressEventEmitter from './interfaces/progress-event-emitter';
@@ -31,6 +31,10 @@ interface TweetMedia {
     images: string[],
     video?: string
 }
+
+type TweetLinksMap = Map<string, string>;
+type TweetMediaMap = Map<string, string | string[]>;
+type TweetMap = Map<string, string | TweetLinksMap | TweetMediaMap>;
 
 export interface TwitterExtractorOptions {
     maxLimit: number,
@@ -183,28 +187,26 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
             return <Tweet[]> [];
         }
 
-        let tweets: Tweet[] = [];
+        let tweets: OrderedSet<TweetMap> = OrderedSet();
         let canContinueScrolling = true;
         let lastHeight = 0;
         let page = 1;
+        const definedLimit = (maxLimit !== Number.POSITIVE_INFINITY);
         while(true) {
             const tweetContainers = await bookmarks.$$('article');
             if(tweetContainers.length === 0)
                 break;
 
-            const currentCollectedTweets =
+            const extractedTweets =
                 await TwitterBookmarkExtractor
                 .extractTweetsFromContainers(tweetContainers);
-            tweets = tweets.concat(currentCollectedTweets);
-            tweets = uniqWith(tweets, isEqual); // TODO *might* be slow? use a set or another structure
+            const extractedTweetsSet = OrderedSet(extractedTweets);
+            tweets = tweets.union(extractedTweetsSet);
 
-            const definedLimit = (maxLimit !== Number.POSITIVE_INFINITY);
             const reachedLimit = definedLimit
-                && (tweets.length >= maxLimit);
-            if(reachedLimit) {
-                tweets = tweets.slice(0, maxLimit);
+                && (tweets.size >= maxLimit);
+            if(reachedLimit) 
                 break;
-            }
 
             lastHeight =
                 await bookmarks.evaluate(() => document.body.scrollHeight);
@@ -230,23 +232,29 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
             ++page;
         }
 
-        return tweets;
+        let tweetMapsArray = tweets.toArray();
+        if(definedLimit)
+            tweetMapsArray = tweetMapsArray.slice(0, maxLimit);
+
+        const tweetsArray =
+            tweetMapsArray.map(tweet => tweet.toObject() as unknown as Tweet);
+        return tweetsArray;
     }
 
     protected static async extractTweetsFromContainers(tweetContainers: ElementHandle<Element>[]) {
-        const currentCollectedTweets: Tweet[] = [];
+        let extractedTweets: List<TweetMap> = List();
         for(const container of tweetContainers) {
             try {
                 const tweet =
                     await TwitterBookmarkExtractor.extractTweetFromContainer(container);
-                currentCollectedTweets.push(tweet);
+                extractedTweets = extractedTweets.push(tweet);
             } catch(err) {
                 console.warn(err.message);
                 continue;
             }
         }
 
-        return currentCollectedTweets;
+        return extractedTweets;
     }
 
     protected static async extractTweetFromContainer(articleContainer: ElementHandle<Element>) {
@@ -275,7 +283,8 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
             media: tweetMedia
         };
 
-        return tweet;
+        const tweetMap = <TweetMap> Map(fromJS(tweet));
+        return tweetMap;
     }
 
     protected static async extractTweetLinks(articleTweet: ElementHandle<Element>): Promise<TweetLinks> {
