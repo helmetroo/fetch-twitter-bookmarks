@@ -185,21 +185,18 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
 
         let tweets: Tweet[] = [];
         let canContinueScrolling = true;
-        let lastMaxHeight = 0;
-        let currentPage = 1;
+        let lastHeight = 0;
+        let page = 1;
         while(true) {
             const tweetContainers = await bookmarks.$$('article');
-            if(tweetContainers.length === 0) {
+            if(tweetContainers.length === 0)
                 break;
-            }
-
-            await TwitterBookmarkExtractor
-                .clearExtractedsFromBrowser(bookmarks, currentPage);
 
             const currentCollectedTweets =
                 await TwitterBookmarkExtractor
                 .extractTweetsFromContainers(tweetContainers);
             tweets = tweets.concat(currentCollectedTweets);
+            tweets = uniqWith(tweets, isEqual); // TODO *might* be slow? use a set or another structure
 
             const definedLimit = (maxLimit !== Number.POSITIVE_INFINITY);
             const reachedLimit = definedLimit
@@ -209,35 +206,30 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
                 break;
             }
 
-            await TwitterBookmarkExtractor
-                .markExtractedsFromBrowser(bookmarks, currentPage);
-
-            lastMaxHeight =
+            lastHeight =
                 await bookmarks.evaluate(() => document.body.scrollHeight);
-            const currentScrollProgress = await TwitterBookmarkExtractor
+            const newScrollProgress = await TwitterBookmarkExtractor
                 .scrollForMoreTweets(bookmarks);
             const stopScrolling =
-                await bookmarks.evaluate(({lastMaxHeight, currentScrollProgress}) => {
-                    const currentMaxHeight = document.body.scrollHeight;
-                    const currentMaxLessThanLast =
-                        currentMaxHeight <= lastMaxHeight;
+                await bookmarks.evaluate(({lastHeight, newScrollProgress}) => {
+                    const newHeight = document.body.scrollHeight;
+                    const heightsAreSame =
+                        lastHeight === newHeight;
 
-                    const currentHeightMoreThanCurrentMax =
-                        currentScrollProgress >= currentMaxHeight;
+                    const progressMeetsOrExceedsHeight =
+                        newScrollProgress >= newHeight;
 
-                    return currentMaxLessThanLast && currentHeightMoreThanCurrentMax;
+                    return heightsAreSame && progressMeetsOrExceedsHeight;
                 }, {
                     timeout: 2000
-                }, {lastMaxHeight, currentScrollProgress});
+                }, {lastHeight, newScrollProgress});
 
             if(stopScrolling)
                 break;
 
-            ++currentPage;
-            await bookmarks.waitFor(1000);
+            ++page;
         }
 
-        tweets = uniqWith(tweets, isEqual);
         return tweets;
     }
 
@@ -366,23 +358,6 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
         return tweetMedia;
     }
 
-    protected static async clearExtractedsFromBrowser(bookmarks: Page, page: number) {
-        const toBeErased = `REMOVEME_${page - 1}`;
-        await bookmarks.$$eval(`.${toBeErased}`, (elementsToErase) => {
-            elementsToErase.forEach(element => element.remove());
-        });
-    }
-
-    protected static async markExtractedsFromBrowser(bookmarks: Page, page: number) {
-        await bookmarks.evaluate(({ page }) => {
-            const toBeMarked = `REMOVEME_${page}`;
-            const articleElements = document.querySelectorAll('article');
-            Array.from(articleElements).forEach(element => {
-                element.className = toBeMarked;
-            });
-        }, { page });
-    }
-
     protected static async scrollForMoreTweets(bookmarks: Page) {
         return bookmarks.evaluate(() => {
             // We need to scroll only a bit at a time to catch all the elements.
@@ -390,7 +365,8 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
             // Is there a better way?
             const _window = <any> window;
             _window['te_currentScrollHeight'] = _window['te_currentScrollHeight'] || 0;
-            _window['te_currentScrollHeight'] += document.documentElement.clientHeight;
+
+            _window['te_currentScrollHeight'] += 50;
             window.scrollTo(0, _window['te_currentScrollHeight']);
 
             return _window['te_currentScrollHeight'];
