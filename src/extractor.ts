@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { parse as urlParse } from 'url';
 
 import { Browser, ElementHandle, Page } from 'puppeteer';
-import { OrderedSet, Map, List, fromJS } from 'immutable';
+import { OrderedSet, Map, List, fromJS, hash } from 'immutable';
 
 import UsernamePasswordCredentials from './interfaces/username-password-credentials';
 import ProgressEventEmitter from './interfaces/progress-event-emitter';
@@ -35,6 +35,10 @@ interface TweetMedia {
 type TweetLinksMap = Map<string, string>;
 type TweetMediaMap = Map<string, string | string[]>;
 type TweetMap = Map<string, string | TweetLinksMap | TweetMediaMap>;
+const TweetMapHashCode = function(this: TweetMap) {
+    const tweetLink = <string> this.getIn(['links', 'toTweet']);
+    return hash(tweetLink);
+}
 
 export interface TwitterExtractorOptions {
     maxLimit: number,
@@ -245,9 +249,12 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
         let extractedTweets: List<TweetMap> = List();
         for(const container of tweetContainers) {
             try {
-                const tweet =
+                const tweetToAdd =
                     await TwitterBookmarkExtractor.extractTweetFromContainer(container);
-                extractedTweets = extractedTweets.push(tweet);
+
+                const tweetMap = <TweetMap> Map(fromJS(tweetToAdd));
+                tweetMap.hashCode = TweetMapHashCode;
+                extractedTweets = extractedTweets.push(tweetMap);
             } catch(err) {
                 console.warn(err.message);
                 continue;
@@ -287,8 +294,7 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
             media
         };
 
-        const tweetMap = <TweetMap> Map(fromJS(tweet));
-        return tweetMap;
+        return tweet;
     }
 
     protected static async extractTweetLinks(articleTweet: ElementHandle<Element>): Promise<TweetLinks> {
