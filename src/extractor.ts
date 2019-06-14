@@ -6,7 +6,6 @@ import { OrderedSet, Map, List, fromJS } from 'immutable';
 
 import UsernamePasswordCredentials from './interfaces/username-password-credentials';
 import ProgressEventEmitter from './interfaces/progress-event-emitter';
-import Link from './interfaces/link';
 import Maybe, { isNil } from './interfaces/maybe';
 
 type CredentialFields = {
@@ -17,6 +16,7 @@ type CredentialFields = {
 interface Tweet {
     profile: string,
     text: string,
+    date: string,
     links: TweetLinks,
     media: TweetMedia
 }
@@ -24,12 +24,12 @@ interface Tweet {
 interface TweetLinks {
     toProfile: string,
     toTweet: string,
-    embedded?: string
+    embedded: string | null
 }
 
 interface TweetMedia {
     images: string[],
-    video?: string
+    video: string | null
 }
 
 type TweetLinksMap = Map<string, string>;
@@ -264,23 +264,27 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
             throw noTweetContainer;
         }
 
-        const tweetLinks =
+        const links =
             await TwitterBookmarkExtractor.extractTweetLinks(articleTweet);
-        const profileUrl = urlParse(tweetLinks.toProfile);
+        const profileUrl = urlParse(links.toProfile);
         const profile = Maybe.fromValue(profileUrl.path)
             .getOrElse(' ').substr(1);
 
-        const tweetText =
+        const text =
             await TwitterBookmarkExtractor.extractTweetText(articleTweet);
 
-        const tweetMedia =
+        const media =
             await TwitterBookmarkExtractor.extractTweetMedia(articleTweet);
+
+        const date =
+            await TwitterBookmarkExtractor.extractTweetDate(articleTweet);
 
         const tweet: Tweet = {
             profile,
-            links: tweetLinks,
-            text: tweetText,
-            media: tweetMedia
+            text,
+            date,
+            links,
+            media
         };
 
         const tweetMap = <TweetMap> Map(fromJS(tweet));
@@ -292,8 +296,8 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
         const tweetHrefs =
             await articleTweet.$$eval(
                 'a',
-                links => links.map(link => (link as unknown as Link).href)
-            ) as unknown as string[];
+                links => links.map(link => (<HTMLAnchorElement> link).href)
+            );
 
         const [
             profileLink,
@@ -303,9 +307,9 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
         ] = tweetHrefs;
 
         return {
-            toProfile: profileLink,
-            toTweet: tweetLink,
-            embedded: embeddedLink
+            toProfile: profileLink || '',
+            toTweet: tweetLink || '',
+            embedded: embeddedLink || ''
         };
     }
 
@@ -320,7 +324,7 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
                 await tweetTextContainer.$$eval(
                     'div[lang] > *',
                     TwitterBookmarkExtractor.createTextExtractor(),
-                ) as unknown as string[];
+                );
         } catch(err) {}
 
         const tweetText = tweetTexts.join('');
@@ -331,7 +335,7 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
         const textExtractor = (blocks: Element[]) =>
             blocks.map(
                 (block: Element) => {
-                    const textBlock = (block as HTMLElement);
+                    const textBlock = <HTMLElement> block;
 
                     const text = textBlock.textContent;
                     if(!text) {
@@ -339,7 +343,7 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
                         if(!emojiTextDiv)
                             return '';
 
-                        const emojiText = emojiTextDiv.getAttribute('aria-label');
+                        const emojiText = emojiTextDiv.getAttribute('aria-label') || '';
                         return emojiText;
                     }
 
@@ -355,16 +359,16 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
         try {
             tweetImageHrefs = await articleTweet.$$eval(
                 '[alt="Image"]',
-                links => links.map(link => (link as unknown as HTMLImageElement).src)
-            ) as unknown as string[];
+                links => links.map(link => (<HTMLImageElement> link).src)
+            );
         } catch(err) {}
 
-        let tweetVideoHref: string | undefined = undefined;
+        let tweetVideoHref: string | null = null;
         try {
             tweetVideoHref = await articleTweet.$eval(
                 'video',
-                video => (video as unknown as HTMLVideoElement).src
-            ) as unknown as string;
+                video => (<HTMLVideoElement> video).src
+            );
         } catch(err) {}
 
         const tweetMedia: TweetMedia = {
@@ -373,6 +377,15 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
         };
 
         return tweetMedia;
+    }
+
+    protected static async extractTweetDate(articleTweet: ElementHandle<Element>) {
+        const tweetDate = await articleTweet.$eval(
+            'time',
+            (timeElement) => (<HTMLTimeElement> timeElement).dateTime
+        );
+
+        return tweetDate;
     }
 
     protected static async scrollForMoreTweets(bookmarks: Page) {
