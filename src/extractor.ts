@@ -77,7 +77,7 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
         this.emitProgressEvent(this.PAGE_NEW);
 
         this.bookmarksPage =
-            await this.resolveBookmarksPage(newPage, this.options.newTab);
+            await this.resolveBookmarksPage(newPage, !this.options.newTab);
 
         const tweets =
             await TwitterBookmarkExtractor.extractTweetsFromPage(this.bookmarksPage!, this.options.maxLimit);
