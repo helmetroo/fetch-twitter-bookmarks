@@ -319,27 +319,35 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
             tweetTexts =
                 await tweetTextContainer.$$eval(
                     'div[lang] > *',
-                    blocks => blocks.map(
-                        block => {
-                            const textBlock = (block as unknown as HTMLElement);
-
-                            const text = textBlock.textContent;
-                            if(!text) {
-                                const emojiDiv = Maybe.fromValue(textBlock.querySelector('div'));
-                                const emojiText = emojiDiv
-                                    .map(div => div.getAttribute('aria-label'))
-                                    .getOrElse('');
-                                return emojiText;
-                            }
-
-                            return text;
-                        }
-                    )
+                    TwitterBookmarkExtractor.createTextExtractor(),
                 ) as unknown as string[];
         } catch(err) {}
 
         const tweetText = tweetTexts.join('');
         return tweetText;
+    }
+
+    protected static createTextExtractor() {
+        const textExtractor = (blocks: Element[]) =>
+            blocks.map(
+                (block: Element) => {
+                    const textBlock = (block as HTMLElement);
+
+                    const text = textBlock.textContent;
+                    if(!text) {
+                        const emojiTextDiv = textBlock.querySelector('div');
+                        if(!emojiTextDiv)
+                            return '';
+
+                        const emojiText = emojiTextDiv.getAttribute('aria-label');
+                        return emojiText;
+                    }
+
+                    return text;
+                }
+            );
+
+        return textExtractor;
     }
 
     protected static async extractTweetMedia(articleTweet: ElementHandle<Element>) {
