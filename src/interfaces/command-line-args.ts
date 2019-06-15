@@ -1,12 +1,10 @@
 import { ParsedArgs } from 'minimist';
-import UsernamePasswordCredentials from './username-password-credentials';
-import MaxTweetLimit from './max-tweet-limit';
-import UseChromeExecutable from './use-chrome-executable';
 
-export default interface CommandLineArgs
-extends ParsedArgs
-implements UsernamePasswordCredentials
-implements MaxTweetLimit
-implements UseChromeExecutable
+export default interface CommandLineArgs extends ParsedArgs
 {
+    username: string | null;
+    password: string | null;
+    fileName: string | null;
+    maxLimit: number;
+    useChromeExecutable: string | null;
 }

@@ -2,50 +2,18 @@ import { EventEmitter } from 'events';
 import { parse as urlParse } from 'url';
 
 import { Browser, ElementHandle, Page } from 'puppeteer';
-import { OrderedSet, Map, List, fromJS, hash } from 'immutable';
+import { OrderedSet, Map, List, fromJS } from 'immutable';
+import { get } from 'lodash';
 
+import Tweet, { TweetLinks, TweetMedia } from './interfaces/tweet';
+import TweetMap, { TweetMapHashCode, TweetMapEquals } from './interfaces/tweet-map';
+import TwitterBookmarksExtractorOptions from './interfaces/extractor-options';
 import UsernamePasswordCredentials from './interfaces/username-password-credentials';
+import CredentialFields from './interfaces/credential-fields';
 import ProgressEventEmitter from './interfaces/progress-event-emitter';
 import Maybe, { isNil } from './interfaces/maybe';
 
-type CredentialFields = {
-    usernameField: ElementHandle<Element>,
-    passwordField: ElementHandle<Element>
-}
-
-interface Tweet {
-    profile: string,
-    text: string,
-    date: string,
-    links: TweetLinks,
-    media: TweetMedia
-}
-
-interface TweetLinks {
-    toProfile: string,
-    toTweet: string,
-    embedded: string | null
-}
-
-interface TweetMedia {
-    images: string[],
-    video: string | null
-}
-
-type TweetLinksMap = Map<string, string>;
-type TweetMediaMap = Map<string, string | string[]>;
-type TweetMap = Map<string, string | TweetLinksMap | TweetMediaMap>;
-const TweetMapHashCode = function(this: TweetMap) {
-    const tweetLink = <string> this.getIn(['links', 'toTweet']);
-    return hash(tweetLink);
-}
-
-export interface TwitterExtractorOptions {
-    maxLimit: number,
-    newTab: boolean
-}
-
-class TwitterBookmarkExtractor extends ProgressEventEmitter {
+class TwitterBookmarksExtractor extends ProgressEventEmitter {
     protected readonly PAGE_NEW: string = 'page:new';
     protected readonly TWITTER_PAGE: string = 'twitter:page';
     protected readonly LOGIN: string = 'login';
@@ -69,23 +37,36 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
     constructor(
         protected browser: Browser,
         protected credentials: UsernamePasswordCredentials,
-        protected options: TwitterExtractorOptions
+        protected options: TwitterBookmarksExtractorOptions
     ) {
         super();
     }
 
     public async extract() {
-        const newPage = (this.options.newTab)
-            ? await this.browser.newPage()
-            : (await this.browser.pages())[0];
-        this.emitProgressEvent(this.PAGE_NEW);
+        // Must get to at least the bookmarks page before returning anything
+        try {
+            const newPage = (this.options.newTab)
+                ? await this.browser.newPage()
+                : (await this.browser.pages())[0];
+            this.emitProgressEvent(this.PAGE_NEW);
 
-        this.bookmarksPage =
-            await this.resolveBookmarksPage(newPage, !this.options.newTab);
+            this.bookmarksPage =
+                await this.resolveBookmarksPage(newPage, !this.options.newTab);
+        } catch(err) {
+            const bookmarksUnavailableErr = new Error(`Couldn't open Twitter bookmarks page.`);
+            console.error(err.message);
+            console.error(err.stack);
+            throw bookmarksUnavailableErr;
+        }
 
-        const tweets =
-            await TwitterBookmarkExtractor.extractTweetsFromPage(this.bookmarksPage!, this.options.maxLimit);
-        this.emitProgressEvent(this.BOOKMARKED_TWEETS_EXTRACT_COMPLETE);
+        let tweets: Tweet[] = [];
+        try {
+            tweets =
+                await TwitterBookmarksExtractor
+                .extractTweetsFromPage(this.bookmarksPage, this.options.maxLimit);
+
+            this.emitProgressEvent(this.BOOKMARKED_TWEETS_EXTRACT_COMPLETE);
+        } catch(err) {}
 
         return tweets;
     }
@@ -112,7 +93,7 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
             this.emitProgressEvent(this.TWITTER_PAGE);
         }
 
-        await TwitterBookmarkExtractor.login(page, this.credentials);
+        await TwitterBookmarksExtractor.login(page, this.credentials);
         this.emitProgressEvent(this.LOGIN);
     }
 
@@ -143,7 +124,7 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
         const loginForm = await twitterLogin.waitForSelector('form[action="/sessions"]');
 
         const maybeLoginFormFields =
-            await TwitterBookmarkExtractor.getLoginFormFields(loginForm);
+            await TwitterBookmarksExtractor.getLoginFormFields(loginForm);
         await maybeLoginFormFields.mapAsync(async (loginFormFields) => {
             const {
                 usernameField,
@@ -155,21 +136,27 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
                 password
             } = credentials;
 
-            await TwitterBookmarkExtractor
+            await TwitterBookmarksExtractor
                 .enterCredentialInField(username, usernameField);
-            await TwitterBookmarkExtractor
+            await TwitterBookmarksExtractor
                 .enterCredentialInField(password, passwordField);
 
             const submitButton = await loginForm.$('[role="button"]');
-            await submitButton!.click(); // Sometimes fails
+            if(!submitButton)
+                throw new Error('Unable to login. Cannot find login button.');
+            try {
+                await submitButton.click();
+            } catch(err) {
+                throw new Error('Unable to login. Cannot find login button.');
+            }
+
             await twitterLogin.waitForNavigation();
 
             const currentUrl = twitterLogin.url();
             const loginFailed = currentUrl
                 .includes('https://mobile.twitter.com/login/error');
-            if(loginFailed) {
+            if(loginFailed)
                 throw new Error('Incorrect credentials.');
-            }
         });
     }
 
@@ -202,7 +189,7 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
                 break;
 
             const extractedTweets =
-                await TwitterBookmarkExtractor
+                await TwitterBookmarksExtractor
                 .extractTweetsFromContainers(tweetContainers);
             const extractedTweetsSet = OrderedSet(extractedTweets);
             tweets = tweets.union(extractedTweetsSet);
@@ -214,7 +201,7 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
 
             lastHeight =
                 await bookmarks.evaluate(() => document.body.scrollHeight);
-            const newScrollProgress = await TwitterBookmarkExtractor
+            const newScrollProgress = await TwitterBookmarksExtractor
                 .scrollForMoreTweets(bookmarks);
             const stopScrolling =
                 await bookmarks.evaluate(({lastHeight, newScrollProgress}) => {
@@ -250,10 +237,11 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
         for(const container of tweetContainers) {
             try {
                 const tweetToAdd =
-                    await TwitterBookmarkExtractor.extractTweetFromContainer(container);
+                    await TwitterBookmarksExtractor.extractTweetFromContainer(container);
 
                 const tweetMap = <TweetMap> Map(fromJS(tweetToAdd));
                 tweetMap.hashCode = TweetMapHashCode;
+                tweetMap.equals = TweetMapEquals;
                 extractedTweets = extractedTweets.push(tweetMap);
             } catch(err) {
                 console.warn(err.message);
@@ -272,21 +260,29 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
         }
 
         const links =
-            await TwitterBookmarkExtractor.extractTweetLinks(articleTweet);
+            await TwitterBookmarksExtractor.extractTweetLinks(articleTweet);
+
+        const tweetUrl = urlParse(links.toTweet);
+        const tweetId = Maybe.fromValue(tweetUrl.path)
+            .map(path => path.split('/'))
+            .map(splitPath => splitPath[splitPath.length - 1])
+            .getOrElse('');
+
         const profileUrl = urlParse(links.toProfile);
         const profile = Maybe.fromValue(profileUrl.path)
             .getOrElse(' ').substr(1);
 
         const text =
-            await TwitterBookmarkExtractor.extractTweetText(articleTweet);
+            await TwitterBookmarksExtractor.extractTweetText(articleTweet);
 
         const media =
-            await TwitterBookmarkExtractor.extractTweetMedia(articleTweet);
+            await TwitterBookmarksExtractor.extractTweetMedia(articleTweet);
 
         const date =
-            await TwitterBookmarkExtractor.extractTweetDate(articleTweet);
+            await TwitterBookmarksExtractor.extractTweetDate(articleTweet);
 
         const tweet: Tweet = {
+            id: tweetId,
             profile,
             text,
             date,
@@ -298,24 +294,26 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
     }
 
     protected static async extractTweetLinks(articleTweet: ElementHandle<Element>): Promise<TweetLinks> {
-        // TS treats return of $$eval as ElementHandle<string[]>, but we know this really gives us a string[]
-        const tweetHrefs =
-            await articleTweet.$$eval(
-                'a',
-                links => links.map(link => (<HTMLAnchorElement> link).href)
-            );
+        let toProfile = '';
+        let toTweet = '';
+        let embedded = '';
 
-        const [
-            profileLink,
-            _,
-            tweetLink,
-            embeddedLink
-        ] = tweetHrefs;
+        try {
+            const tweetHrefs =
+                await articleTweet.$$eval(
+                    'a',
+                    links => links.map(link => (<HTMLAnchorElement> link).href)
+                );
+
+            toProfile = get(tweetHrefs, 0, '');
+            toTweet = get(tweetHrefs, 2, '');
+            embedded = get(tweetHrefs, 3, '');
+        } catch(err) {}
 
         return {
-            toProfile: profileLink || '',
-            toTweet: tweetLink || '',
-            embedded: embeddedLink || ''
+            toProfile,
+            toTweet,
+            embedded
         };
     }
 
@@ -329,7 +327,7 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
             tweetTexts =
                 await tweetTextContainer.$$eval(
                     'div[lang] > *',
-                    TwitterBookmarkExtractor.createTextExtractor(),
+                    TwitterBookmarksExtractor.createTextExtractor(),
                 );
         } catch(err) {}
 
@@ -410,4 +408,4 @@ class TwitterBookmarkExtractor extends ProgressEventEmitter {
     }
 }
 
-export default TwitterBookmarkExtractor;
+export default TwitterBookmarksExtractor;
