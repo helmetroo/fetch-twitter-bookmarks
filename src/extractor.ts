@@ -20,7 +20,6 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
     protected readonly BOOKMARKED_TWEETS_PAGE: string = 'bookmarked-tweets:page';
     protected readonly BOOKMARKED_TWEETS_EXTRACT: string = 'bookmarked-tweets:extract';
     protected readonly BOOKMARKED_TWEETS_EXTRACT_COMPLETE: string = 'bookmarked-tweets:extract-complete';
-    protected readonly FINISH = 'finish';
 
     protected readonly PROGRESS_EVENTS: string[] = [
         this.PAGE_NEW,
@@ -29,7 +28,6 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
         this.BOOKMARKED_TWEETS_PAGE,
         this.BOOKMARKED_TWEETS_EXTRACT,
         this.BOOKMARKED_TWEETS_EXTRACT_COMPLETE,
-        this.FINISH
     ];
 
     protected bookmarksPage: Page | null = null;
@@ -40,6 +38,10 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
         protected options: TwitterBookmarksExtractorOptions
     ) {
         super();
+    }
+
+    public getBookmarksPage() {
+        return Maybe.fromValue(this.bookmarksPage);
     }
 
     public async extract() {
@@ -95,14 +97,6 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
 
         await TwitterBookmarksExtractor.login(page, this.credentials);
         this.emitProgressEvent(this.LOGIN);
-    }
-
-    public async finish() {
-        (this.options.newTab)
-            ? isNil(this.bookmarksPage) ? undefined : await this.bookmarksPage.close()
-            : await this.browser.close();
-
-        this.emitProgressEvent(this.FINISH);
     }
 
     protected static async getLoginFormFields(loginForm: ElementHandle<Element>) {

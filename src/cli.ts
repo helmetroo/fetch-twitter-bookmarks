@@ -6,6 +6,7 @@ import CommandLineArgs from './interfaces/command-line-args';
 import ValidCommandLineArgs from './interfaces/valid-command-line-args';
 import UsernamePasswordCredentials from './interfaces/username-password-credentials';
 import Tweet from './interfaces/tweet';
+import Maybe, { isNil } from './interfaces/maybe';
 
 import TwitterBookmarksExtractor from './extractor';
 import TwitterBookmarksExtractorOptions from './interfaces/extractor-options';
@@ -109,6 +110,27 @@ export default class CommandLineInterface {
     }
 
     public async run() {
+        const cmdLineArgs =
+            CommandLineInterface.tryGetCommandLineArgs();
+
+        const browser =
+            await CommandLineInterface.tryCreateBrowser(cmdLineArgs);
+
+        const extractor =
+            CommandLineInterface.createBookmarksExtractor(cmdLineArgs, browser);
+
+        const tweets =
+            await CommandLineInterface.tryExtractTweets(extractor);
+
+        await CommandLineInterface
+            .tryEndBrowserSession(cmdLineArgs, browser, extractor);
+
+        await CommandLineInterface.exportTweets(tweets, cmdLineArgs);
+
+        CommandLineInterface.exitWithSuccess();
+    }
+
+    protected static tryGetCommandLineArgs() {
         let cmdLineArgs: ValidCommandLineArgs;
         try {
             cmdLineArgs =
@@ -117,8 +139,13 @@ export default class CommandLineInterface {
             return CommandLineInterface.exitWithError(err);
         }
 
+        return cmdLineArgs;
+    }
+
+    protected static async tryCreateBrowser(cmdLineArgs: ValidCommandLineArgs) {
         const puppeteerLaunchOpts =
             CommandLineInterface.getPuppeteerLaunchOptions(cmdLineArgs);
+
         let browser: Browser;
         try {
             browser = await puppeteer.launch(puppeteerLaunchOpts);
@@ -127,6 +154,13 @@ export default class CommandLineInterface {
             return CommandLineInterface.exitWithError(noBrowserErr);
         }
 
+        return browser;
+    }
+
+    protected static createBookmarksExtractor(
+        cmdLineArgs: ValidCommandLineArgs,
+        browser: Browser
+    ) {
         const extractorConfig =
             CommandLineInterface.toExtractorConfig(cmdLineArgs);
         const {
@@ -135,24 +169,47 @@ export default class CommandLineInterface {
         } = extractorConfig;
         const extractor = new TwitterBookmarksExtractor(browser, credentials, options);
 
-        let tweets: Tweet[] = [];
+        return extractor;
+    }
+
+    protected static async tryExtractTweets(
+        extractor: TwitterBookmarksExtractor
+    ) {
         try {
-            tweets = await CommandLineInterface.extractTweets(extractor);
+            const tweets = await CommandLineInterface.extractTweets(extractor);
+            return tweets;
         } catch(err) {
             const cantGetTweetsErr = new Error('Failed to extract tweets.');
             return CommandLineInterface.exitWithError(cantGetTweetsErr);
         }
 
+        return <Tweet[]> [];
+    }
+
+    protected static async tryEndBrowserSession(
+        cmdLineArgs: ValidCommandLineArgs,
+        browser: Browser,
+        extractor: TwitterBookmarksExtractor
+    ) {
         const useChromeExecutable =
             cmdLineArgs.useChromeExecutable;
         if(!useChromeExecutable) {
             try {
-                await extractor.finish();
+                await browser.close();
+                return;
             } catch(err) {
                 console.error('Failed to terminate browser properly.');
             }
         }
 
+        extractor.getBookmarksPage()
+            .mapAsync(async (bookmarksPage) => await bookmarksPage.close());
+    }
+
+    protected static async exportTweets(
+        tweets: Tweet[],
+        cmdLineArgs: ValidCommandLineArgs
+    ) {
         try {
             const fileName = cmdLineArgs.fileName;
             if(!isEmpty(fileName)) {
@@ -165,16 +222,14 @@ export default class CommandLineInterface {
 
         const stdOutExporter = new StdOutExporter();
         await stdOutExporter.export(tweets);
-
-        CommandLineInterface.exitWithSuccess();
     }
 
     protected static exitWithSuccess() {
-        process.exit(0);
+        return process.exit(0);
     }
 
     protected static exitWithError(err: Error) {
         console.error(err.message);
-        process.exit(1);
+        return process.exit(1);
     }
 }
