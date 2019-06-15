@@ -179,10 +179,6 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
         }
 
         let tweets: OrderedSet<TweetMap> = OrderedSet();
-        let canContinueScrolling = true;
-        let lastHeight = 0;
-        let page = 1;
-        const definedLimit = (maxLimit !== Number.POSITIVE_INFINITY);
         while(true) {
             const tweetContainers = await bookmarks.$$('article');
             if(tweetContainers.length === 0)
@@ -194,41 +190,18 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
             const extractedTweetsSet = OrderedSet(extractedTweets);
             tweets = tweets.union(extractedTweetsSet);
 
-            const reachedLimit = definedLimit
-                && (tweets.size >= maxLimit);
+            const reachedLimit = (tweets.size >= maxLimit);
             if(reachedLimit) 
                 break;
 
-            lastHeight =
-                await bookmarks.evaluate(() => document.body.scrollHeight);
-            const newScrollProgress = await TwitterBookmarksExtractor
-                .scrollForMoreTweets(bookmarks);
-            const stopScrolling =
-                await bookmarks.evaluate(({lastHeight, newScrollProgress}) => {
-                    const newHeight = document.body.scrollHeight;
-                    const heightsAreSame =
-                        lastHeight === newHeight;
-
-                    const progressMeetsOrExceedsHeight =
-                        newScrollProgress >= newHeight;
-
-                    return heightsAreSame && progressMeetsOrExceedsHeight;
-                }, {
-                    timeout: 2000
-                }, {lastHeight, newScrollProgress});
-
-            if(stopScrolling)
+            const continueScrolling =
+                TwitterBookmarksExtractor.scrollForMoreTweets(bookmarks);
+            if(!continueScrolling)
                 break;
-
-            ++page;
         }
 
-        let tweetMapsArray = tweets.toArray();
-        if(definedLimit)
-            tweetMapsArray = tweetMapsArray.slice(0, maxLimit);
-
         const tweetsArray =
-            tweetMapsArray.map(tweet => tweet.toObject() as unknown as Tweet);
+            TwitterBookmarksExtractor.tweetMapsToTweets(tweets, maxLimit);
         return tweetsArray;
     }
 
@@ -244,7 +217,7 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
                 tweetMap.equals = TweetMapEquals;
                 extractedTweets = extractedTweets.push(tweetMap);
             } catch(err) {
-                console.warn(err.message);
+                console.error(err.message);
                 continue;
             }
         }
@@ -393,6 +366,36 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
     }
 
     protected static async scrollForMoreTweets(bookmarks: Page) {
+        let continueScrolling = false;
+
+        try {
+            const heightBeforeScroll =
+                await bookmarks.evaluate(() => document.body.scrollHeight);
+
+            const scrollProgress = await TwitterBookmarksExtractor
+                .scrollDown(bookmarks);
+
+            continueScrolling =
+                await bookmarks.evaluate(({heightBeforeScroll, scrollProgress}) => {
+                    const heightAfterScroll = document.body.scrollHeight;
+                    const scrollHeightsChanged =
+                        heightBeforeScroll !== heightAfterScroll;
+
+                    const notReachedAfterScrollHeight =
+                        scrollProgress < heightAfterScroll;
+
+                    return scrollHeightsChanged || notReachedAfterScrollHeight;
+                }, {
+                    timeout: 2000
+                }, {heightBeforeScroll, scrollProgress});
+        } catch(err) {
+            console.error('Ran into an issue scrolling for more tweets.');
+        }
+
+        return continueScrolling;
+    }
+
+    protected static async scrollDown(bookmarks: Page) {
         return bookmarks.evaluate(() => {
             // We need to scroll only a bit at a time to catch all the elements.
             // We can't scroll by document.body.scrollHeight as we miss elements this way.
@@ -405,6 +408,15 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
 
             return _window['te_currentScrollHeight'];
         });
+    }
+
+    protected static tweetMapsToTweets(tweets: OrderedSet<TweetMap>, maxLimit: number) {
+        const tweetMapsArray = tweets.toArray()
+            .slice(0, maxLimit);
+
+        const tweetsArray =
+            tweetMapsArray.map(tweet => tweet.toObject() as unknown as Tweet);
+        return tweetsArray;
     }
 }
 
