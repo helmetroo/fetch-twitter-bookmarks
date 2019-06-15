@@ -13,11 +13,7 @@
 
 At the moment, Twitter doesn't have an API that allows you to fetch your bookmarks. Bookmarks are also only available through the mobile app, or by visiting the mobile version of Twitter's site (https://m.twitter.com). 
 
-To counter this, this tool uses Puppeteer to act as a user to log in to the mobile Twitter site, navigate to the bookmarks site (https://m.twitter.com/i/bookmarks), then scroll down continuously and scrape each tweet. The tool assumes tweets are wrapped in a 
-```html
-<article />
-```
-element.
+To counter this, this tool uses Puppeteer to act as a user to log in to the mobile Twitter site, navigate to the bookmarks page (https://m.twitter.com/i/bookmarks), then scroll down continuously and scrape each tweet. The tool assumes tweets are wrapped in an ```<article />``` element.
 
 <a name="requirements"></a>
 
@@ -48,11 +44,16 @@ npm i
 ## Usage
 
 ```bash
-npm run start -- --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT
+npm run start -- --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME""
 ```
 
-- `username` (required): Your Twitter phone, username or email.
-- `password` (required): Your Twitter password.
-- `maxLimit` (optional): The maximum number of bookmarked tweets to fetch. Must be an integer. If not provided, the tool will fetch all the bookmarks it can, stopping when it can no longer scroll further for more tweets.
+Begins scraping bookmarked tweets. 
 
-When it's finished, a JSON file called `tweets.json` will appear in the project directory containing your bookmarked tweets.
+When finished, tweets are printed to STDOUT. If `fileName` is provided as an argument, the tool will save your fetched tweets to the file under the filename you provide. (see below).
+
+| Parameter  | Description                                                                                                                                                                                                     |
+| :--        | :--                                                                                                                                                                                                             |
+| `username` | (required): Your Twitter phone, username or email.                                                                                                                                                              |
+| `password` | (required): Your Twitter password.                                                                                                                                                                              |
+| `maxLimit` | (optional): The maximum number of bookmarked tweets to fetch. Must be an integer. If not provided, the tool will fetch all the bookmarks it can, stopping when it can no longer scroll further for more tweets. |
+| `fileName` | (optional): The filename where the tool will export your fetched tweets to. Filenames can be absolute or relative. If relative, they will be resolved relative to your current working directory.                          |
