@@ -1,27 +1,54 @@
-import { Bar, Presets } from 'cli-progress';
+import Progress from 'progress';
 
-import ProgressEventEmitter from './interfaces/progress-event-emitter';
+import Progressable from './interfaces/progressable';
+import EventCompleteRatio from './interfaces/event-complete-ratio';
 
 export default class ProgressBar {
-    protected progressBar: Bar =
-        new Bar({}, Presets.shades_classic);
+    protected static readonly PROGRESS_BAR_FORMAT: string =
+        ':eventName :bar :percent ETA :etas';
 
-    protected achievedEvents: number = 0;
+    protected progressBar: Progress;
+    protected eventsComplete: number = 0;
+    protected totalEvents: number;
 
-    constructor(private watchable: ProgressEventEmitter) {}
-
-    public startWatching() {
-        this.progressBar.start(this.watchable.numEvents, 0);
-        this.watchable.on('progress', this.updateProgress.bind(this));
+    constructor(private progressable: Progressable) {
+        this.totalEvents = this.progressable.numEvents;
+        this.progressBar = new Progress(ProgressBar.PROGRESS_BAR_FORMAT, {
+            total: this.totalEvents,
+            width: 36
+        });
     }
 
-    protected updateProgress(eventName: string) {
-        ++this.achievedEvents;
-        this.progressBar.update(this.achievedEvents);
-    } 
+    public startWatching() {
+        this.progressable.on('progress', this.updateProgress.bind(this));
+        this.progressable.on('message', this.showMessage.bind(this));
+    }
+
+    protected updateProgress(eventName: string, eventCompleteRatio?: EventCompleteRatio) {
+        if(eventCompleteRatio) {
+            const currentProgressPercent =
+                (this.eventsComplete + eventCompleteRatio.complete) / this.totalEvents;
+
+            this.progressBar.update(currentProgressPercent, {
+                eventName
+            });
+            return;
+        }
+
+        this.eventsComplete++;
+        this.progressBar.tick({
+            eventName
+        });
+    }
 
     public stopWatching() {
-        this.progressBar.stop();
-        this.watchable.off('progress', this.updateProgress.bind(this));
+        this.progressBar.terminate();
+
+        this.progressable.off('progress', this.updateProgress.bind(this));
+        this.progressable.off('message', this.showMessage.bind(this));
+    }
+
+    public showMessage(message: string) {
+        this.progressBar.interrupt(message);
     }
 }

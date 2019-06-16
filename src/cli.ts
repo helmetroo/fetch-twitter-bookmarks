@@ -1,30 +1,25 @@
-import puppeteer, { Browser, LaunchOptions as PuppeteerLaunchOptions } from 'puppeteer';
 import minimist from 'minimist';
 import { isEmpty } from 'lodash';
 
 import CommandLineArgs from './interfaces/command-line-args';
 import ValidCommandLineArgs from './interfaces/valid-command-line-args';
 import UsernamePasswordCredentials from './interfaces/username-password-credentials';
-import Tweet from './interfaces/tweet';
-import Maybe, { isNil } from './interfaces/maybe';
 
-import TwitterBookmarksExtractor from './extractor';
-import TwitterBookmarksExtractorOptions from './interfaces/extractor-options';
-
-import Exporter from './exporters/exporter';
-import JSONExporter from './exporters/json';
-import StdOutExporter from './exporters/std-out';
+import ExtractionTaskOptions from './interfaces/extractor-task-options';
 
 import ProgressBar from './progress-bar';
+import ExtractionTask from './extraction-task';
 
 export default class CommandLineInterface {
+    protected progressBar: ProgressBar | null = null;
+
     protected static getCommandLineArgs() {
         const cmdLineArgs = <CommandLineArgs> minimist(process.argv.slice(2), {
             string: [
                 'username',
                 'password',
                 'fileName',
-                'useChromeExecutable',
+                'chromePath',
             ],
 
             default: {
@@ -32,7 +27,7 @@ export default class CommandLineInterface {
                 password: null,
                 fileName: null,
                 maxLimit: Number.POSITIVE_INFINITY,
-                useChromeExecutable: null
+                chromePath: null
             }
         });
 
@@ -51,21 +46,27 @@ export default class CommandLineInterface {
             throw noCredentialsErr;
         }
 
+        if(typeof maxLimit === 'string') {
+            const notValidLimitErr = new Error('Invalid max limit. Must be an integer.');
+            throw notValidLimitErr;
+        }
+
         if(!Number.isInteger(maxLimit) && maxLimit !== Number.POSITIVE_INFINITY) {
             const notValidLimitErr = new Error('Invalid max limit. Must be an integer.');
             throw notValidLimitErr;
         }
 
-        // TODO verify if chromeExecutable was provided, check if it exists at provided path
+        // TODO verify if chromePath was provided, check if it exists at provided path
         return <ValidCommandLineArgs> cmdLineArgs;
     }
 
-    protected static toExtractorConfig(cmdLineArgs: ValidCommandLineArgs) {
+    protected toExtractionTaskConfig(cmdLineArgs: ValidCommandLineArgs) {
         const {
             username,
             password,
+            fileName,
             maxLimit,
-            useChromeExecutable
+            chromePath
         } = cmdLineArgs; 
 
         const credentials: UsernamePasswordCredentials = {
@@ -73,163 +74,56 @@ export default class CommandLineInterface {
             password
         };
 
-        const options: TwitterBookmarksExtractorOptions = {
-            maxLimit,
-            newTab: !isEmpty(useChromeExecutable)
-        };
-
-        return {
+        const extractionTaskConfig: ExtractionTaskOptions = {
             credentials,
-            options
-        };
-    }
-
-    protected static getPuppeteerLaunchOptions(cmdLineArgs: CommandLineArgs) {
-        const {
-            useChromeExecutable
-        } = cmdLineArgs;
-
-        const puppeteerOptions: PuppeteerLaunchOptions = {
-            defaultViewport: null
+            fileName,
+            maxLimit,
+            chromePath,
+            errorCallback: this.exitWithError.bind(this)
         };
 
-        if(useChromeExecutable)
-            puppeteerOptions.executablePath = useChromeExecutable;
-
-        return puppeteerOptions;
-    }
-
-    protected static async extractTweets(extractor: TwitterBookmarksExtractor) {
-        const progressBar = new ProgressBar(extractor);
-
-        progressBar.startWatching();
-        const tweets = await extractor.extract();
-        progressBar.stopWatching();
-
-        return tweets;
+        return extractionTaskConfig;
     }
 
     public async run() {
         const cmdLineArgs =
-            CommandLineInterface.tryGetCommandLineArgs();
+            this.tryGetCommandLineArgs();
 
-        const browser =
-            await CommandLineInterface.tryCreateBrowser(cmdLineArgs);
+        const extractionTaskConfig =
+            this.toExtractionTaskConfig(cmdLineArgs);
 
-        const extractor =
-            CommandLineInterface.createBookmarksExtractor(cmdLineArgs, browser);
+        const extractionTask = new ExtractionTask(extractionTaskConfig);
 
-        const tweets =
-            await CommandLineInterface.tryExtractTweets(extractor);
+        this.progressBar = new ProgressBar(extractionTask);
+        this.progressBar.startWatching();
+        await extractionTask.run();
+        this.progressBar.stopWatching();
 
-        await CommandLineInterface
-            .tryEndBrowserSession(cmdLineArgs, browser, extractor);
-
-        await CommandLineInterface.exportTweets(tweets, cmdLineArgs);
-
-        CommandLineInterface.exitWithSuccess();
+        this.exitWithSuccess();
     }
 
-    protected static tryGetCommandLineArgs() {
+    protected tryGetCommandLineArgs() {
         let cmdLineArgs: ValidCommandLineArgs;
         try {
             cmdLineArgs =
                 CommandLineInterface.getCommandLineArgs();
         } catch(err) {
-            return CommandLineInterface.exitWithError(err);
+            return this.exitWithError(err);
         }
 
         return cmdLineArgs;
     }
 
-    protected static async tryCreateBrowser(cmdLineArgs: ValidCommandLineArgs) {
-        const puppeteerLaunchOpts =
-            CommandLineInterface.getPuppeteerLaunchOptions(cmdLineArgs);
-
-        let browser: Browser;
-        try {
-            browser = await puppeteer.launch(puppeteerLaunchOpts);
-        } catch(err) {
-            const noBrowserErr = new Error(`Couldn't start browser.`);
-            return CommandLineInterface.exitWithError(noBrowserErr);
-        }
-
-        return browser;
-    }
-
-    protected static createBookmarksExtractor(
-        cmdLineArgs: ValidCommandLineArgs,
-        browser: Browser
-    ) {
-        const extractorConfig =
-            CommandLineInterface.toExtractorConfig(cmdLineArgs);
-        const {
-            credentials,
-            options
-        } = extractorConfig;
-        const extractor = new TwitterBookmarksExtractor(browser, credentials, options);
-
-        return extractor;
-    }
-
-    protected static async tryExtractTweets(
-        extractor: TwitterBookmarksExtractor
-    ) {
-        try {
-            const tweets = await CommandLineInterface.extractTweets(extractor);
-            return tweets;
-        } catch(err) {
-            const cantGetTweetsErr = new Error('Failed to extract tweets.');
-            return CommandLineInterface.exitWithError(cantGetTweetsErr);
-        }
-
-        return <Tweet[]> [];
-    }
-
-    protected static async tryEndBrowserSession(
-        cmdLineArgs: ValidCommandLineArgs,
-        browser: Browser,
-        extractor: TwitterBookmarksExtractor
-    ) {
-        const useChromeExecutable =
-            cmdLineArgs.useChromeExecutable;
-        if(!useChromeExecutable) {
-            try {
-                await browser.close();
-                return;
-            } catch(err) {
-                console.error('Failed to terminate browser properly.');
-            }
-        }
-
-        extractor.getBookmarksPage()
-            .mapAsync(async (bookmarksPage) => await bookmarksPage.close());
-    }
-
-    protected static async exportTweets(
-        tweets: Tweet[],
-        cmdLineArgs: ValidCommandLineArgs
-    ) {
-        try {
-            const fileName = cmdLineArgs.fileName;
-            if(!isEmpty(fileName)) {
-                const exporter: Exporter = new JSONExporter(fileName!);
-                await exporter.export(tweets);
-            }
-        } catch(err) {
-            console.error('Failed to export tweets to file.');
-        }
-
-        const stdOutExporter = new StdOutExporter();
-        await stdOutExporter.export(tweets);
-    }
-
-    protected static exitWithSuccess() {
+    protected exitWithSuccess() {
         return process.exit(0);
     }
 
-    protected static exitWithError(err: Error) {
-        console.error(err.message);
+    protected exitWithError(err: Error) {
+        if(this.progressBar)
+            this.progressBar.showMessage(err.message);
+        else
+            console.error(err.message);
+
         return process.exit(1);
     }
 }

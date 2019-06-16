@@ -1,10 +1,16 @@
-import CommandLineArgs from './command-line-args';
+import CommandLineArgs, {
+    OptionalCommandLineArgs,
+    RequiredCommandLineArgs,
+    DefaultNumericCommandLineArgs
+} from './command-line-args';
 
-export default interface ValidCommandLineArgs extends CommandLineArgs
-{
-    username: string;
-    password: string;
-    fileName: string | null;
-    maxLimit: number;
-    useChromeExecutable: string;
+type Valid<T extends CommandLineArgs> = {
+    readonly [O in OptionalCommandLineArgs]: T[O] | null;
+} & {
+    readonly [R in RequiredCommandLineArgs]: NonNullable<T[R]>;
+} & {
+    readonly [D in DefaultNumericCommandLineArgs]: Extract<T[D], number>
 }
+
+type ValidCommandLineArgs = Valid<CommandLineArgs>;
+export default ValidCommandLineArgs;

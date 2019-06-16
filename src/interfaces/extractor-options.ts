@@ -1,4 +1,10 @@
+import { Browser } from 'puppeteer';
+
+import UsernamePasswordCredentials from './username-password-credentials';
+
 export default interface TwitterBookmarksExtractorOptions {
-    maxLimit: number,
-    newTab: boolean
+    credentials: UsernamePasswordCredentials;
+    browser: Browser;
+    maxLimit: number;
+    newTab: boolean;
 }

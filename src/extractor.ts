@@ -11,33 +11,38 @@ import TwitterBookmarksExtractorOptions from './interfaces/extractor-options';
 import UsernamePasswordCredentials from './interfaces/username-password-credentials';
 import CredentialFields from './interfaces/credential-fields';
 import ProgressEventEmitter from './interfaces/progress-event-emitter';
+import EventCompleteRatio from './interfaces/event-complete-ratio';
 import Maybe, { isNil } from './interfaces/maybe';
 
 class TwitterBookmarksExtractor extends ProgressEventEmitter {
-    protected readonly PAGE_NEW: string = 'page:new';
-    protected readonly TWITTER_PAGE: string = 'twitter:page';
-    protected readonly LOGIN: string = 'login';
-    protected readonly BOOKMARKED_TWEETS_PAGE: string = 'bookmarked-tweets:page';
-    protected readonly BOOKMARKED_TWEETS_EXTRACT: string = 'bookmarked-tweets:extract';
-    protected readonly BOOKMARKED_TWEETS_EXTRACT_COMPLETE: string = 'bookmarked-tweets:extract-complete';
+    public static readonly PAGE_NEW: string = 'extractor:page:new';
+    public static readonly TWITTER_PAGE: string = 'extractor:page:load-twitter';
+    public static readonly LOGIN: string = 'extractor:page:login';
+    public static readonly BOOKMARKED_TWEETS_PAGE: string = 'extractor:page:load-bookmarks';
+    public static readonly BOOKMARKED_TWEETS_EXTRACTION: string = 'extractor:tweets:extraction';
+    public static readonly BOOKMARKED_TWEETS_EXTRACT_COMPLETE: string = 'extractor:tweets:complete';
 
-    protected readonly PROGRESS_EVENTS: string[] = [
-        this.PAGE_NEW,
-        this.TWITTER_PAGE,
-        this.LOGIN,
-        this.BOOKMARKED_TWEETS_PAGE,
-        this.BOOKMARKED_TWEETS_EXTRACT,
-        this.BOOKMARKED_TWEETS_EXTRACT_COMPLETE,
+    public static readonly PROGRESS_EVENTS: string[] = [
+        TwitterBookmarksExtractor.PAGE_NEW,
+        TwitterBookmarksExtractor.TWITTER_PAGE,
+        TwitterBookmarksExtractor.LOGIN,
+        TwitterBookmarksExtractor.BOOKMARKED_TWEETS_PAGE,
+        TwitterBookmarksExtractor.BOOKMARKED_TWEETS_EXTRACTION,
+        TwitterBookmarksExtractor.BOOKMARKED_TWEETS_EXTRACT_COMPLETE,
     ];
+
+    protected browser: Browser;
+    protected credentials: UsernamePasswordCredentials;
 
     protected bookmarksPage: Page | null = null;
 
     constructor(
-        protected browser: Browser,
-        protected credentials: UsernamePasswordCredentials,
         protected options: TwitterBookmarksExtractorOptions
     ) {
         super();
+
+        this.browser = options.browser;
+        this.credentials = options.credentials;
     }
 
     public getBookmarksPage() {
@@ -50,24 +55,34 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
             const newPage = (this.options.newTab)
                 ? await this.browser.newPage()
                 : (await this.browser.pages())[0];
-            this.emitProgressEvent(this.PAGE_NEW);
+            this.emitProgressEvent(TwitterBookmarksExtractor.PAGE_NEW);
 
             this.bookmarksPage =
                 await this.resolveBookmarksPage(newPage, !this.options.newTab);
         } catch(err) {
+            // TODO wrap original err in the one below; create separate error classes
             const bookmarksUnavailableErr = new Error(`Couldn't open Twitter bookmarks page.`);
-            console.error(err.message);
-            console.error(err.stack);
             throw bookmarksUnavailableErr;
         }
 
         let tweets: Tweet[] = [];
         try {
-            tweets =
-                await TwitterBookmarksExtractor
-                .extractTweetsFromPage(this.bookmarksPage, this.options.maxLimit);
+            await this.bookmarksPage.waitForSelector('article');
+        } catch(err) {
+            this.emitMessageEvent(
+                'Unable to fetch tweets. Could not find any <article /> containers which contain tweets.'
+            )
 
-            this.emitProgressEvent(this.BOOKMARKED_TWEETS_EXTRACT_COMPLETE);
+            return tweets;
+        }
+
+        try {
+            tweets =
+                await this.extractTweetsFromPage(this.bookmarksPage);
+
+            this.emitProgressEvent(
+                TwitterBookmarksExtractor.BOOKMARKED_TWEETS_EXTRACT_COMPLETE
+            );
         } catch(err) {}
 
         return tweets;
@@ -85,18 +100,18 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
         if(stillAtLogin)
             await this.goToLoginPageAndLogin(page, false);
 
-        this.emitProgressEvent(this.BOOKMARKED_TWEETS_PAGE);
+        this.emitProgressEvent(TwitterBookmarksExtractor.BOOKMARKED_TWEETS_PAGE);
         return page;
     }
 
     protected async goToLoginPageAndLogin(page: Page, goToLogin = true) {
         if(goToLogin) {
             await page.goto('https://mobile.twitter.com/login');
-            this.emitProgressEvent(this.TWITTER_PAGE);
+            this.emitProgressEvent(TwitterBookmarksExtractor.TWITTER_PAGE);
         }
 
         await TwitterBookmarksExtractor.login(page, this.credentials);
-        this.emitProgressEvent(this.LOGIN);
+        this.emitProgressEvent(TwitterBookmarksExtractor.LOGIN);
     }
 
     protected static async getLoginFormFields(loginForm: ElementHandle<Element>) {
@@ -164,62 +179,62 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
         });
     }
 
-    protected static async extractTweetsFromPage(bookmarks: Page, maxLimit: number) {
-        try {
-            await bookmarks.waitForSelector('article');
-        } catch(err) {
-            console.error('Unable to fetch tweets. Could not find any <article /> containers which contain tweets.');
-            return <Tweet[]> [];
-        }
-
+    protected async extractTweetsFromPage(bookmarks: Page) {
         let tweets: OrderedSet<TweetMap> = OrderedSet();
+        const definedMaxLimit =
+            this.options.maxLimit !== Number.POSITIVE_INFINITY;
+
         while(true) {
             const tweetContainers = await bookmarks.$$('article');
             if(tweetContainers.length === 0)
                 break;
 
             const extractedTweets =
-                await TwitterBookmarksExtractor
-                .extractTweetsFromContainers(tweetContainers);
+                await this.extractTweetsFromContainers(tweetContainers);
             const extractedTweetsSet = OrderedSet(extractedTweets);
             tweets = tweets.union(extractedTweetsSet);
 
-            const reachedLimit = (tweets.size >= maxLimit);
+            if(definedMaxLimit)
+                this.emitTweetExtractionProgressEvent(tweets.size);
+
+            const reachedLimit =
+                (tweets.size >= this.options.maxLimit);
             if(reachedLimit) 
                 break;
 
             const continueScrolling =
-                TwitterBookmarksExtractor.scrollForMoreTweets(bookmarks);
+                await this.scrollForMoreTweets(bookmarks);
             if(!continueScrolling)
                 break;
         }
 
+        if(!definedMaxLimit) {
+            this.emitProgressEvent(
+                TwitterBookmarksExtractor.BOOKMARKED_TWEETS_EXTRACTION
+            );
+        }
+
         const tweetsArray =
-            TwitterBookmarksExtractor.tweetMapsToTweets(tweets, maxLimit);
+            TwitterBookmarksExtractor.tweetMapsToTweets(tweets, this.options.maxLimit);
         return tweetsArray;
     }
 
-    protected static async extractTweetsFromContainers(tweetContainers: ElementHandle<Element>[]) {
+    protected async extractTweetsFromContainers(tweetContainers: ElementHandle<Element>[]) {
         let extractedTweets: List<TweetMap> = List();
         for(const container of tweetContainers) {
-            try {
-                const tweetToAdd =
-                    await TwitterBookmarksExtractor.extractTweetFromContainer(container);
+            const tweetToAdd =
+                await this.extractTweetFromContainer(container);
 
-                const tweetMap = <TweetMap> Map(fromJS(tweetToAdd));
-                tweetMap.hashCode = TweetMapHashCode;
-                tweetMap.equals = TweetMapEquals;
-                extractedTweets = extractedTweets.push(tweetMap);
-            } catch(err) {
-                console.error(err.message);
-                continue;
-            }
+            const tweetMap = <TweetMap> Map(fromJS(tweetToAdd));
+            tweetMap.hashCode = TweetMapHashCode;
+            tweetMap.equals = TweetMapEquals;
+            extractedTweets = extractedTweets.push(tweetMap);
         }
 
         return extractedTweets;
     }
 
-    protected static async extractTweetFromContainer(articleContainer: ElementHandle<Element>) {
+    protected async extractTweetFromContainer(articleContainer: ElementHandle<Element>) {
         const articleTweet = await articleContainer.$('div[data-testid="tweet"]');
         if(isNil(articleTweet)) {
             const noTweetContainer = new Error('Could not find tweet container for current tweet. Skipping...');
@@ -227,7 +242,7 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
         }
 
         const links =
-            await TwitterBookmarksExtractor.extractTweetLinks(articleTweet);
+            await this.extractTweetLinks(articleTweet);
 
         const tweetUrl = urlParse(links.toTweet);
         const tweetId = Maybe.fromValue(tweetUrl.path)
@@ -240,13 +255,13 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
             .getOrElse(' ').substr(1);
 
         const text =
-            await TwitterBookmarksExtractor.extractTweetText(articleTweet);
+            await this.extractTweetText(articleTweet);
 
         const media =
-            await TwitterBookmarksExtractor.extractTweetMedia(articleTweet);
+            await this.extractTweetMedia(articleTweet);
 
         const date =
-            await TwitterBookmarksExtractor.extractTweetDate(articleTweet);
+            await this.extractTweetDate(articleTweet);
 
         const tweet: Tweet = {
             id: tweetId,
@@ -260,7 +275,7 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
         return tweet;
     }
 
-    protected static async extractTweetLinks(articleTweet: ElementHandle<Element>): Promise<TweetLinks> {
+    protected async extractTweetLinks(articleTweet: ElementHandle<Element>) {
         let toProfile = '';
         let toTweet = '';
         let embedded = '';
@@ -277,14 +292,16 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
             embedded = get(tweetHrefs, 3, '');
         } catch(err) {}
 
-        return {
+        const tweetLinks: TweetLinks = {
             toProfile,
             toTweet,
             embedded
         };
+
+        return tweetLinks;
     }
 
-    protected static async extractTweetText(articleTweet: ElementHandle<Element>) {
+    protected async extractTweetText(articleTweet: ElementHandle<Element>) {
         let tweetTexts: string[] = [];
         try {
             const tweetTextContainer = await articleTweet.$('div[lang]');
@@ -325,7 +342,7 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
         return textExtractor;
     }
 
-    protected static async extractTweetMedia(articleTweet: ElementHandle<Element>) {
+    protected async extractTweetMedia(articleTweet: ElementHandle<Element>) {
         let tweetImageHrefs: string[] = [];
         try {
             tweetImageHrefs = await articleTweet.$$eval(
@@ -350,16 +367,34 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
         return tweetMedia;
     }
 
-    protected static async extractTweetDate(articleTweet: ElementHandle<Element>) {
-        const tweetDate = await articleTweet.$eval(
-            'time',
-            (timeElement) => (<HTMLTimeElement> timeElement).dateTime
-        );
+    protected async extractTweetDate(articleTweet: ElementHandle<Element>) {
+        let tweetDate = '';
+        try {
+            tweetDate = await articleTweet.$eval(
+                'time',
+                (timeElement) => (<HTMLTimeElement> timeElement).dateTime
+            );
+        } catch(err) {
+            // TODO pass err
+            this.emitMessageEvent('Unable to extract time from tweet.');
+        }
 
         return tweetDate;
     }
 
-    protected static async scrollForMoreTweets(bookmarks: Page) {
+    protected emitTweetExtractionProgressEvent(numTweetsCollected: number) {
+        const extractionCompletionRatio: EventCompleteRatio = {
+            complete: numTweetsCollected,
+            total: this.options.maxLimit
+        }
+
+        this.emitProgressEvent(
+            TwitterBookmarksExtractor.BOOKMARKED_TWEETS_EXTRACTION,
+            extractionCompletionRatio
+        );
+    }
+
+    protected async scrollForMoreTweets(bookmarks: Page) {
         let continueScrolling = false;
 
         try {
@@ -383,7 +418,8 @@ class TwitterBookmarksExtractor extends ProgressEventEmitter {
                     timeout: 2000
                 }, {heightBeforeScroll, scrollProgress});
         } catch(err) {
-            console.error('Ran into an issue scrolling for more tweets.');
+            // TODO pass err
+            this.emitMessageEvent('Ran into an issue scrolling for more tweets.');
         }
 
         return continueScrolling;

@@ -1,17 +1,13 @@
 import { EventEmitter } from 'events';
 
+import EventCompleteRatio from './event-complete-ratio';
+
 export default abstract class ProgressEventEmitter extends EventEmitter {
-    protected PROGRESS_EVENTS: string[] = [];
-
-    get events() {
-        return this.PROGRESS_EVENTS;
+    protected emitProgressEvent(eventName: string, eventCompleteRatio?: EventCompleteRatio) {
+        this.emit('progress', eventName, eventCompleteRatio);
     }
 
-    get numEvents() {
-        return this.PROGRESS_EVENTS.length;
+    protected emitMessageEvent(message: string) {
+        this.emit('message', message);
     }
-
-    protected emitProgressEvent(eventName: string) {
-        this.emit('progress', eventName);
-    } 
 }
