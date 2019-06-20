@@ -2,6 +2,7 @@ import Progress from 'progress';
 
 import Progressable from './interfaces/progressable';
 import EventCompleteRatio from './interfaces/event-complete-ratio';
+import { ProgressEvent, MessageEvent } from './interfaces/progress-event-emitter';
 
 export default class ProgressBar {
     protected static readonly PROGRESS_BAR_FORMAT: string =
@@ -24,7 +25,12 @@ export default class ProgressBar {
         this.progressable.on('message', this.showMessage.bind(this));
     }
 
-    protected updateProgress(eventName: string, eventCompleteRatio?: EventCompleteRatio) {
+    protected updateProgress(progressEvent: ProgressEvent) {
+        const {
+            eventName,
+            eventCompleteRatio
+        } = progressEvent;
+
         if(eventCompleteRatio) {
             const currentProgressPercent =
                 (this.eventsComplete + eventCompleteRatio.complete) / this.totalEvents;
@@ -48,7 +54,11 @@ export default class ProgressBar {
         this.progressable.off('message', this.showMessage.bind(this));
     }
 
-    public showMessage(message: string) {
+    public showMessage(messageEvent: MessageEvent) {
+        const {
+            message
+        } = messageEvent;
+
         this.progressBar.interrupt(message);
     }
 }

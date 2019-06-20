@@ -1,17 +1,25 @@
 import minimist from 'minimist';
-import { isEmpty } from 'lodash';
 
 import CommandLineArgs from './interfaces/command-line-args';
 import ValidCommandLineArgs from './interfaces/valid-command-line-args';
 import UsernamePasswordCredentials from './interfaces/username-password-credentials';
-
+import { MessageEvent } from './interfaces/progress-event-emitter';
+import Maybe from './interfaces/maybe';
 import ExtractionTaskOptions from './interfaces/extractor-task-options';
 
 import ProgressBar from './progress-bar';
 import ExtractionTask from './extraction-task';
 
 export default class CommandLineInterface {
-    protected progressBar: ProgressBar | null = null;
+    protected progressBar: Maybe<ProgressBar> =
+        Maybe.none<ProgressBar>();
+    protected extractionTask: Maybe<ExtractionTask> =
+        Maybe.none<ExtractionTask>();
+
+    protected static readonly END_SIGNALS: NodeJS.Signals[] = [
+        'SIGINT',
+        'SIGTERM'
+    ]
 
     protected static getCommandLineArgs() {
         const cmdLineArgs = <CommandLineArgs> minimist(process.argv.slice(2), {
@@ -41,7 +49,7 @@ export default class CommandLineInterface {
             maxLimit,
         } = cmdLineArgs;
 
-        if(isEmpty(username) || isEmpty(password)) {
+        if(!username || !password) {
             const noCredentialsErr = new Error('No credentials provided.');
             throw noCredentialsErr;
         }
@@ -79,6 +87,7 @@ export default class CommandLineInterface {
             fileName,
             maxLimit,
             chromePath,
+            successCallback: this.stop.bind(this),
             errorCallback: this.exitWithError.bind(this)
         };
 
@@ -86,20 +95,23 @@ export default class CommandLineInterface {
     }
 
     public async run() {
+        this.watchForStopSignal();
+
         const cmdLineArgs =
             this.tryGetCommandLineArgs();
 
         const extractionTaskConfig =
             this.toExtractionTaskConfig(cmdLineArgs);
 
-        const extractionTask = new ExtractionTask(extractionTaskConfig);
+        const extractionTask
+            = new ExtractionTask(extractionTaskConfig);
+        this.extractionTask = Maybe.some(extractionTask);
 
-        this.progressBar = new ProgressBar(extractionTask);
-        this.progressBar.startWatching();
-        await extractionTask.run();
-        this.progressBar.stopWatching();
+        const progressBar = new ProgressBar(extractionTask);
+        this.progressBar = Maybe.some(progressBar);
 
-        this.exitWithSuccess();
+        progressBar.startWatching();
+        extractionTask.run();
     }
 
     protected tryGetCommandLineArgs() {
@@ -119,11 +131,36 @@ export default class CommandLineInterface {
     }
 
     protected exitWithError(err: Error) {
-        if(this.progressBar)
-            this.progressBar.showMessage(err.message);
-        else
-            console.error(err.message);
+        const exitMessage =
+            this.progressBar.map(
+                progressBar =>
+                    (message: string) => {
+                        const messageEvent = new MessageEvent(message);
+                        progressBar.showMessage(messageEvent);
+                    }
+            )
+            .getOrElse((message: string) => console.error(message));
 
+        exitMessage(err.message);
         return process.exit(1);
+    }
+
+    protected watchForStopSignal() {
+        for(const signal of CommandLineInterface.END_SIGNALS)
+            process.on(signal, this.stop.bind(this));
+    }
+
+    protected stopWatchingForStopSignal() {
+        for(const signal of CommandLineInterface.END_SIGNALS)
+            process.off(signal, this.stop.bind(this));
+    }
+
+    protected stop() {
+        this.stopWatchingForStopSignal();
+
+        this.progressBar
+            .map(progressBar => progressBar.stopWatching());
+
+        this.exitWithSuccess();
     }
 }
