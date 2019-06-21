@@ -3,7 +3,7 @@ import { parse as urlParse } from 'url';
 import { ElementHandle, Page } from 'puppeteer';
 import { OrderedSet, Map, List, fromJS } from 'immutable';
 import { Observable, Subscriber, defer, pipe, from } from 'rxjs';
-import { switchMap, tap } from 'rxjs/operators';
+import { switchMap } from 'rxjs/operators';
 
 import Tweet, { TweetLinks, TweetMedia } from './interfaces/tweet';
 import TweetMap, { TweetMapHashCode, TweetMapEquals } from './interfaces/tweet-map';
@@ -22,7 +22,6 @@ class TwitterBookmarksExtractor {
 
                 const extractProcess =
                     ensureContainers.pipe(
-                        tap(() => console.log('Tweets are on page. Start extracting!')),
                         thenExtractTweets
                     ).subscribe();
 
@@ -60,7 +59,7 @@ class TwitterBookmarksExtractor {
 
             const continueScrolling =
                 await TwitterBookmarksExtractor.scrollForMoreTweets(bookmarks);
-            if(!continueScrolling){
+            if(!continueScrolling) {
                 subscriber.complete();
                 break;
             }
@@ -69,61 +68,61 @@ class TwitterBookmarksExtractor {
 
     protected static async extractTweetsFromContainers(tweetContainers: ElementHandle<Element>[]) {
         let extractedTweets: List<TweetMap> = List();
+
         for(const container of tweetContainers) {
             const tweetToAdd =
                 await this.extractTweetFromContainer(container);
 
-            tweetToAdd.map((tweet) => {
+            if(tweetToAdd) {
                 const tweetMap = <TweetMap> Map(fromJS(tweetToAdd));
                 tweetMap.hashCode = TweetMapHashCode;
                 tweetMap.equals = TweetMapEquals;
                 extractedTweets = extractedTweets.push(tweetMap);
-            });
+            }
         }
 
         return extractedTweets;
     }
 
     protected static async extractTweetFromContainer(articleContainer: ElementHandle<Element>) {
-        const tweetContainer =
-            Maybe.fromValue(await articleContainer.$('div[data-testid="tweet"]'));
+        const tweetContainer = await articleContainer.$('div[data-testid="tweet"]');
+        if(!tweetContainer)
+            return null;
 
-        return tweetContainer.mapAsync(async (container) => {
-            // TODO Critical info about the tweet (id, profile) comes from here
-            // We may want to discard this container if we can't extract this information
-            const links =
-                await this.extractTweetLinks(container);
+        // TODO Critical info about the tweet (id, profile) comes from here
+        // We may want to discard this tweetContainer if we can't extract this information
+        const links =
+            await this.extractTweetLinks(tweetContainer);
 
-            const tweetUrl = urlParse(links.toTweet);
-            const tweetId = Maybe.fromValue(tweetUrl.path)
-                .map(path => path.split('/'))
-                .map(splitPath => splitPath[splitPath.length - 1])
-                .getOrElse('');
+        const tweetUrl = urlParse(links.toTweet);
+        const tweetId = Maybe.fromValue(tweetUrl.path)
+            .map(path => path.split('/'))
+            .map(splitPath => splitPath[splitPath.length - 1])
+            .getOrElse('');
 
-            const profileUrl = urlParse(links.toProfile);
-            const profile = Maybe.fromValue(profileUrl.path)
-                .getOrElse(' ').substr(1);
+        const profileUrl = urlParse(links.toProfile);
+        const profile = Maybe.fromValue(profileUrl.path)
+            .getOrElse(' ').substr(1);
 
-            const text =
-                await this.extractTweetText(container);
+        const text =
+            await this.extractTweetText(tweetContainer);
 
-            const media =
-                await this.extractTweetMedia(container);
+        const media =
+            await this.extractTweetMedia(tweetContainer);
 
-            const date =
-                await this.extractTweetDate(container);
+        const date =
+            await this.extractTweetDate(tweetContainer);
 
-            const tweet: Tweet = {
-                id: tweetId,
-                profile,
-                text,
-                date,
-                links,
-                media
-            };
+        const tweet: Tweet = {
+            id: tweetId,
+            profile,
+            text,
+            date,
+            links,
+            media
+        };
 
-            return tweet;
-        });
+        return tweet;
     }
 
     protected static async extractTweetLinks(articleTweet: ElementHandle<Element>) {

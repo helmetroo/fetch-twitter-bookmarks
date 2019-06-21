@@ -22,6 +22,8 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
         BookmarksPageManager.CLOSE_BROWSER
     ];
 
+    protected launched: boolean = false;
+
     protected browser: Maybe<Browser> = Maybe.none<Browser>();
     protected bookmarksPage: Maybe<Page> = Maybe.none<Page>();
 
@@ -35,6 +37,7 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
         const browser = await BookmarksPageManager.tryCreateBrowser(this.options);
         this.browser = Maybe.fromValue(browser);
         this.emitProgressEvent(BookmarksPageManager.CREATE_BROWSER);
+        this.launched = true;
 
         const newTab = !this.options.chromePath;
         const bookmarksPage =
@@ -85,9 +88,7 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
             await this.goToBookmarksPage(newPage);
 
         const bookmarksPage =
-            await this.logInIfStillAtLoginPage(
-                bookmarksOrLoginPage, credentials
-            );
+            await this.logInIfStillAtLoginPage(bookmarksOrLoginPage, credentials);
 
         return bookmarksPage;
     }
@@ -105,7 +106,7 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
 
     protected static async goToBookmarksPage(currentPage: Page) {
         await currentPage.goto('https://mobile.twitter.com/i/bookmarks', {
-            waitUntil: 'load'
+            waitUntil: 'networkidle2'
         });
 
         return currentPage;
@@ -118,20 +119,23 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
         const currentUrl = currentPage.url();
         const stillAtLogin =
             currentUrl.includes('https://mobile.twitter.com/login');
-        if(stillAtLogin)
-            return this.login(currentPage, credentials);
+        if(stillAtLogin) {
+            const bookmarksPage = await this.login(currentPage, credentials);
+            return bookmarksPage;
+        }
 
         return currentPage;
     }
 
     protected static async login(
-        currentPage: Page,
+        loginPage: Page,
         credentials: UsernamePasswordCredentials
     ) {
-        const nextPage =
-            await this.tryLoginWithCredentials(currentPage, credentials);
+        const loginForm =
+            await this.getLoginForm(loginPage);
 
-        return nextPage;
+        return this
+            .loginWithCredentials(loginPage, loginForm, credentials);
     }
 
     protected static async getLoginForm(currentPage: Page) {
@@ -153,17 +157,6 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
         };
 
         return loginForm;
-    }
-
-    protected static async tryLoginWithCredentials(
-        loginPage: Page,
-        credentials: UsernamePasswordCredentials
-    ) {
-        const loginForm =
-            await this.getLoginForm(loginPage);
-
-        return this
-            .loginWithCredentials(loginPage, loginForm, credentials);
     }
 
     protected static async loginWithCredentials(
@@ -192,6 +185,7 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
         const loginFailed = currentUrl
             .includes('https://mobile.twitter.com/login/error');
         if(loginFailed) {
+            // TODO allow user to retry their credentials if they don't work
             const incorrectCredsErr = new Error('Fatal: Incorrect credentials.');
             throw incorrectCredsErr;
         }
@@ -211,6 +205,9 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
 
     public async close() {
         try {
+            if(!this.launched)
+                return;
+
             const hasChromePath =
                 !!this.options.chromePath;
 

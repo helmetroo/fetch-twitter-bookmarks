@@ -155,11 +155,14 @@ export default class CommandLineInterface {
             process.off(signal, this.stop.bind(this));
     }
 
-    protected stop() {
+    protected async stop() {
         this.stopWatchingForStopSignal();
 
         this.progressBar
             .map(progressBar => progressBar.stopWatching());
+
+        await this.extractionTask
+            .mapAsync(async (task) => task.stop())
 
         this.exitWithSuccess();
     }
