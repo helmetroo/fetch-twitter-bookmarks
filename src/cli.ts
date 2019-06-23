@@ -18,7 +18,8 @@ export default class CommandLineInterface {
 
     protected static readonly END_SIGNALS: NodeJS.Signals[] = [
         'SIGINT',
-        'SIGTERM'
+        'SIGTERM',
+        'SIGHUP'
     ]
 
     protected static getCommandLineArgs() {
@@ -87,7 +88,8 @@ export default class CommandLineInterface {
             fileName,
             maxLimit,
             chromePath,
-            successCallback: this.stop.bind(this),
+            manualQuit: true,
+            successCallback: this.stopAsComplete.bind(this),
             errorCallback: this.exitWithError.bind(this)
         };
 
@@ -147,23 +149,31 @@ export default class CommandLineInterface {
 
     protected watchForStopSignal() {
         for(const signal of CommandLineInterface.END_SIGNALS)
-            process.on(signal, this.stop.bind(this));
+            process.on(signal, this.stopAsIncomplete.bind(this));
     }
 
     protected stopWatchingForStopSignal() {
         for(const signal of CommandLineInterface.END_SIGNALS)
-            process.off(signal, this.stop.bind(this));
+            process.off(signal, this.stopAsIncomplete.bind(this));
     }
 
-    protected async stop() {
+    protected async stop(completed: boolean) {
         this.stopWatchingForStopSignal();
 
         this.progressBar
             .map(progressBar => progressBar.stopWatching());
 
         await this.extractionTask
-            .mapAsync(async (task) => task.stop())
+            .mapAsync(task => task.stop(completed))
 
         this.exitWithSuccess();
+    }
+
+    protected async stopAsIncomplete() {
+        return this.stop(false);
+    }
+
+    protected async stopAsComplete() {
+        return this.stop(true);
     }
 }

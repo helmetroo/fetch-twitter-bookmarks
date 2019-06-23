@@ -7,6 +7,7 @@ export default interface TwitterBookmarksExtractionTaskOptions {
     readonly fileName: string | null;
     readonly maxLimit: number;
     readonly chromePath: string | null;
+    readonly manualQuit: boolean;
     readonly successCallback: SuccessCallback;
     readonly errorCallback: ErrorCallback;
 }

@@ -8,6 +8,8 @@ interface ProgressEvents {
     message: (event: MessageEvent) => void;
 }
 
+type ProgressEventCategories = keyof ProgressEvents;
+
 type StrictProgressEventEmitter
     = StrictEventEmitter<EventEmitter, ProgressEvents>;
 
@@ -15,8 +17,8 @@ const ExtendableProgressEventEmitter =
     (EventEmitter as { new(): StrictProgressEventEmitter });
 
 export default abstract class ProgressEventEmitter extends ExtendableProgressEventEmitter {
-    protected emitProgressEvent(eventName: string, eventCompleteRatio?: EventCompleteRatio) {
-        const progressEvent = new ProgressEvent(eventName, eventCompleteRatio);
+    protected emitProgressEvent(name: string, eventCompleteRatio?: EventCompleteRatio) {
+        const progressEvent = new ProgressEvent(name, eventCompleteRatio);
         this.emit('progress', progressEvent);
     }
 
@@ -24,21 +26,29 @@ export default abstract class ProgressEventEmitter extends ExtendableProgressEve
         const messageEvent = new MessageEvent(message);
         this.emit('message', messageEvent);
     }
+
+    protected pipeEventsFrom(orig: ProgressEventEmitter) {
+        const oldEmit = orig.emit;
+
+        const self = this;
+        const newEmit: typeof oldEmit = function(...args: Parameters<typeof oldEmit>) {
+            oldEmit.apply(orig, args);
+            self.emit.apply(self, args);
+        };
+
+        orig.emit = newEmit;
+    }
 }
 
 export abstract class ProgressableEvent {
     protected constructor(
-        protected readonly name: keyof ProgressEvents
+        protected readonly category: ProgressEventCategories
     ) {}
-
-    public handle(eventEmitter: ProgressEventEmitter) {
-        eventEmitter.emit(<any> this.name, this);
-    };
 }
 
 export class ProgressEvent extends ProgressableEvent {
     constructor(
-        public readonly eventName: string,
+        public readonly name: string,
         public readonly eventCompleteRatio?: EventCompleteRatio
     ) {
         super('progress');

@@ -1,6 +1,6 @@
 import { Page } from 'puppeteer';
 import { OrderedSet } from 'immutable';
-import { from, fromEvent, merge, Subscription, Observer, Observable } from 'rxjs';
+import { from, Subscription, Observer, Observable } from 'rxjs';
 import { scan, takeWhile, switchMap } from 'rxjs/operators';
 
 import Tweet from './interfaces/tweet';
@@ -23,6 +23,9 @@ import JSONExporter from './exporters/json';
 import StdOutExporter from './exporters/std-out';
 
 export default class ExtractionTask extends Progressable {
+    public static readonly COMPLETE_MESSAGE: string = 'Finished extracting tweets.';
+    public static readonly HALT_MESSAGE: string = 'Stopped extracting tweets.';
+
     public static readonly EXPORT_TWEETS: string = 'extractor:export:tweets';
     public static readonly BOOKMARKED_TWEETS_EXTRACTION: string = 'extractor:tweets:extraction';
     public static readonly BOOKMARKED_TWEETS_EXTRACT_COMPLETE: string = 'extractor:tweets:complete';
@@ -39,7 +42,6 @@ export default class ExtractionTask extends Progressable {
     protected eventForwarder: Subscription = new Subscription();
     protected tweetStream: Subscription = new Subscription();
 
-    protected lastTweetCount: number = 0;
     protected tweets: TweetSet = OrderedSet();
 
     constructor(protected options: TaskOptions) {
@@ -47,12 +49,14 @@ export default class ExtractionTask extends Progressable {
 
         const {
             credentials,
-            chromePath
+            chromePath,
+            manualQuit
         } = this.options;
 
         const pageManagerOptions: PageManagerOptions = {
             credentials,
-            chromePath
+            chromePath,
+            manualQuit
         }
 
         this.bookmarksPageManager =
@@ -60,8 +64,7 @@ export default class ExtractionTask extends Progressable {
 
         this.extractor = new Extractor();
 
-        ExtractionTask.createEventObservable(this.bookmarksPageManager)
-            .subscribe((event: ProgressableEvent) => event.handle(this));
+        this.pipeEventsFrom(this.bookmarksPageManager);
     }
 
     public get numEvents() {
@@ -118,11 +121,6 @@ export default class ExtractionTask extends Progressable {
             ExtractionTask.BOOKMARKED_TWEETS_EXTRACTION,
             extractionCompletionRatio
         );
-
-        if(numTweetsCollected !== this.lastTweetCount)
-            this.emitMessageEvent(`Fetched ${numTweetsCollected} of ${maxLimit} tweets`);
-
-        this.lastTweetCount = numTweetsCollected;
     }
 
     protected onError(err: Error) {
@@ -135,22 +133,37 @@ export default class ExtractionTask extends Progressable {
         return errorCallback(err);
     }
 
-    protected async onComplete() {
-        await this.stop();
-
+    protected onComplete() {
         const successCallback = this.options.successCallback;
         return successCallback();
     }
 
-    protected static createEventObservable(progressEventEmitter: ProgressEventEmitter) {
-        const progressEvents = fromEvent<ProgressEvent>(progressEventEmitter, 'progress');
-        const messageEvents = fromEvent<MessageEvent>(progressEventEmitter, 'message');
-        const allEvents = merge<ProgressableEvent>(
-            progressEvents,
-            messageEvents
-        );
+    public async stop(completed: boolean) {
+        this.emitStopMessage(completed);
+        this.stopForwardingEvents();
+        this.stopStreamingTweets();
 
-        return allEvents;
+        if(completed)
+            this.emitCompleteEvent();
+
+        if(!this.tweets.isEmpty()) {
+            // TODO look at appending to already existing file
+            const tweetsArray = ExtractionTask.tweetMapsToTweets(this.tweets, this.options.maxLimit);
+
+            const fileName = Maybe.fromValue(this.options.fileName);
+            await fileName.mapAsync(fileName => this.exportTweets(tweetsArray, fileName));
+
+            await ExtractionTask.printTweetsToStdOut(tweetsArray);
+        }
+
+        await this.bookmarksPageManager.close();
+    }
+
+    protected emitStopMessage(completed: boolean) {
+        const message = (completed)
+            ? ExtractionTask.COMPLETE_MESSAGE
+            : ExtractionTask.HALT_MESSAGE;
+        this.emitMessageEvent(message);
     }
 
     protected stopForwardingEvents() {
@@ -167,9 +180,17 @@ export default class ExtractionTask extends Progressable {
         );
     }
 
-    protected async exportTweets(tweets: Tweet[]) {
+    protected static tweetMapsToTweets(tweets: TweetSet, maxLimit: number) {
+        const tweetMapsArray = tweets.toArray()
+            .slice(0, maxLimit);
+
+        const tweetsArray =
+            tweetMapsArray.map(tweet => tweet.toObject() as unknown as Tweet);
+        return tweetsArray;
+    }
+
+    protected async exportTweets(tweets: Tweet[], fileName: string) {
         try {
-            const fileName = this.options.fileName;
             if(fileName) {
                 const exporter: Exporter = new JSONExporter(fileName);
                 await exporter.export(tweets);
@@ -181,38 +202,8 @@ export default class ExtractionTask extends Progressable {
         }
     }
 
-    protected async printTweetsToStdOut(tweets: Tweet[]) {
+    protected static async printTweetsToStdOut(tweets: Tweet[]) {
         const stdOutExporter = new StdOutExporter();
         await stdOutExporter.export(tweets);
-    }
-
-    protected async finish(complete = true) {
-        this.stopForwardingEvents();
-        this.stopStreamingTweets();
-
-        if(complete)
-            this.emitCompleteEvent();
-
-        if(!this.tweets.isEmpty()) {
-            // TODO look at appending to already existing file
-            const tweetsArray = ExtractionTask.tweetMapsToTweets(this.tweets, this.options.maxLimit);
-            await this.exportTweets(tweetsArray);
-            await this.printTweetsToStdOut(tweetsArray);
-        }
-
-        await this.bookmarksPageManager.close();
-    }
-
-    public async stop() {
-        await this.finish(false);
-    }
-
-    protected static tweetMapsToTweets(tweets: TweetSet, maxLimit: number) {
-        const tweetMapsArray = tweets.toArray()
-            .slice(0, maxLimit);
-
-        const tweetsArray =
-            tweetMapsArray.map(tweet => tweet.toObject() as unknown as Tweet);
-        return tweetsArray;
     }
 }
