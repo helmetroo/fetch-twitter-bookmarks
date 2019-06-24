@@ -9,7 +9,7 @@ type Valid<T extends CommandLineArgs> = {
 } & {
     readonly [R in RequiredCommandLineArgs]: NonNullable<T[R]>;
 } & {
-    readonly [D in DefaultNumericCommandLineArgs]: Extract<T[D], number>
+    readonly [D in DefaultNumericCommandLineArgs]: Extract<T[D], number>;
 }
 
 type ValidCommandLineArgs = Valid<CommandLineArgs>;

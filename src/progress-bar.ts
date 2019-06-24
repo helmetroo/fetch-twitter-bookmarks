@@ -97,6 +97,4 @@ export default class ProgressBar {
             eventName: this.lastEventName
         });
     }
-
-
 }
