@@ -90,7 +90,7 @@ export default class ExtractionTask extends Progressable {
         const tweets$ = bookmarksPage$.pipe(
             switchMap((page: Page) => <Observable<TweetSet>> this.extractor.extract(page)),
             scan((currentTweets: TweetSet, newTweets: TweetSet) => currentTweets.union(newTweets)),
-            takeWhile((currentTweets: TweetSet) => currentTweets.size <= this.options.maxLimit)
+            takeWhile((currentTweets: TweetSet) => currentTweets.size <= this.options.maxLimit, true)
         );
 
         const tweetsObserver: Observer<TweetSet> = {

@@ -236,12 +236,10 @@ class TwitterBookmarksExtractor {
                 await bookmarks.evaluate(() => {
                     const heightBeforeScroll = document.body.scrollHeight;
 
-                    // TODO For now this method works but perhaps we can make it faster?
-                    const _window = <any> window;
-                    _window['te_currentScrollHeight'] = _window['te_currentScrollHeight'] || 0;
-                    _window['te_currentScrollHeight'] += 50;
-                    window.scrollTo(0, _window['te_currentScrollHeight']);
-                    const newScrollProgress = _window['te_currentScrollHeight'];
+                    const articleElements = document.querySelectorAll('article');
+                    const lastArticleElement = articleElements[articleElements.length - 1];
+                    lastArticleElement.scrollIntoView();
+                    const newScrollProgress = window.scrollY;
 
                     const heightAfterScroll = document.body.scrollHeight;
                     const scrollHeightsChanged =
