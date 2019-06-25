@@ -233,24 +233,40 @@ class TwitterBookmarksExtractor {
 
         try {
             continueScrolling =
-                await bookmarks.evaluate(() => {
-                    const heightBeforeScroll = document.body.scrollHeight;
+                await bookmarks.evaluate(async () => {
+                    const scrollingElement = document.scrollingElement;
+                    if(!scrollingElement)
+                        return false;
+
+                    const preScrollTop = scrollingElement.scrollTop;
 
                     const articleElements = document.querySelectorAll('article');
                     const lastArticleElement = articleElements[articleElements.length - 1];
                     lastArticleElement.scrollIntoView();
-                    const newScrollProgress = window.scrollY;
 
-                    const heightAfterScroll = document.body.scrollHeight;
-                    const scrollHeightsChanged =
-                        heightBeforeScroll !== heightAfterScroll;
+                    await new Promise(res => setTimeout(res, 500));
+                    const postScrollTop = scrollingElement.scrollTop;
 
-                    const notReachedAfterScrollHeight =
-                        newScrollProgress < heightAfterScroll;
+                    const allButtons = document.querySelectorAll('div[role="button"]');
+                    const tryAgainButton = <HTMLElement | undefined>
+                        Array.from(allButtons).filter(
+                            elem => elem.textContent === 'Try again'
+                        )[0];
 
-                    return scrollHeightsChanged || notReachedAfterScrollHeight;
+                    if(tryAgainButton) {
+                        tryAgainButton.click();
+                        await new Promise(res => setTimeout(res, 500));
+                        return true;
+                    }
+
+                    const notReachedEnd = Math.round(postScrollTop + window.innerHeight)
+                        < scrollingElement.scrollHeight;
+
+                    const scrolledDown = preScrollTop !== postScrollTop;
+
+                    return notReachedEnd && scrolledDown;
                 }, {
-                    timeout: 2000
+                    timeout: 5000
                 });
         } catch(err) {}
 
