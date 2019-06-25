@@ -204,7 +204,7 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
     ) {
         await credentialField.focus();
         await credentialField.type(credential, {
-            delay: 100
+            delay: 20
         });
     }
 
