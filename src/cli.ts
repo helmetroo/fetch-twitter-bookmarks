@@ -33,18 +33,19 @@ export default class CommandLineInterface {
                 'chromePath',
             ],
 
+            boolean: [
+                'silent',
+            ],
+
             default: {
                 username: null,
                 password: null,
                 fileName: null,
                 maxLimit: Number.POSITIVE_INFINITY,
-                chromePath: null
+                chromePath: null,
+                silent: false
             }
         });
-
-        const credentials = await this.ensureCredentials(cmdLineArgs);
-        cmdLineArgs.username = credentials.username;
-        cmdLineArgs.password = credentials.password;
 
         return CommandLineInterface.validateCmdLineArgs(cmdLineArgs);
     }
@@ -72,17 +73,21 @@ export default class CommandLineInterface {
         return credentials;
     }
 
-    protected static validateCmdLineArgs(cmdLineArgs: CommandLineArgs) {
+    protected static async validateCmdLineArgs(cmdLineArgs: CommandLineArgs) {
         this.validateMaxLimit(cmdLineArgs);
+        this.validateSilence(cmdLineArgs);
+
+        const credentials = await this.ensureCredentials(cmdLineArgs);
+        cmdLineArgs.username = credentials.username;
+        cmdLineArgs.password = credentials.password;
 
         // TODO verify if chromePath was provided, check if it exists at provided path
         return <ValidCommandLineArgs> cmdLineArgs;
     }
 
     protected static validateMaxLimit(cmdLineArgs: CommandLineArgs) {
-        const {
-            maxLimit,
-        } = cmdLineArgs;
+        const maxLimit = cmdLineArgs.maxLimit;
+
         if(typeof maxLimit === 'string') {
             const notValidLimitErr = new Error('Invalid max limit. Must be an integer.');
             throw notValidLimitErr;
@@ -94,13 +99,24 @@ export default class CommandLineInterface {
         }
     }
 
+    protected static validateSilence(cmdLineArgs: CommandLineArgs) {
+        if(cmdLineArgs.silent) {
+            const fileName = cmdLineArgs.fileName;
+            if(!fileName) {
+                const notValidLimitErr = new Error(`Must provide a filename if tweets won't be printed to STDOUT.`);
+                throw notValidLimitErr;
+            }
+        }
+    }
+
     protected toExtractionTaskConfig(cmdLineArgs: ValidCommandLineArgs) {
         const {
             username,
             password,
             fileName,
             maxLimit,
-            chromePath
+            chromePath,
+            silent
         } = cmdLineArgs;
 
         const credentials: ValidUsernamePasswordCredentials = {
@@ -113,6 +129,7 @@ export default class CommandLineInterface {
             fileName,
             maxLimit,
             chromePath,
+            silent,
             manualQuit: true,
             successCallback: this.stopAsComplete.bind(this),
             errorCallback: this.exitWithError.bind(this)

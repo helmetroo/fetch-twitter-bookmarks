@@ -153,7 +153,8 @@ export default class ExtractionTask extends Progressable {
             const fileName = Maybe.fromValue(this.options.fileName);
             await fileName.mapAsync(fileName => this.exportTweets(tweetsArray, fileName));
 
-            await ExtractionTask.printTweetsToStdOut(tweetsArray);
+            if(!this.options.silent)
+                await ExtractionTask.printTweetsToStdOut(tweetsArray);
         }
 
         await this.bookmarksPageManager.close();
