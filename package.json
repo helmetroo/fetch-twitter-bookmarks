@@ -3,9 +3,7 @@
     "version": "0.0.0",
     "description": "A utility to scrape saved bookmarks from Twitter",
     "main": "src/main.ts",
-    "bin": {
-        "extract-twitter-bookmarks": "./bin/cli.js"
-    },
+    "bin": "./bin/cli.js",
     "scripts": {
         "start": "ts-node src/main.ts",
         "debug": "node --inspect -r ts-node/register src/main.ts",
