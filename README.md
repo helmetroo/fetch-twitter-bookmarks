@@ -4,7 +4,8 @@
 
 * **[How it Works](#how-it-works)**
 * **[Requirements](#requirements)**
-* **[Install](#install)**
+* **[Install globally](#install-globally)**
+* **[Install locally](#install-locally)**
 * **[Usage](#usage)**
 
 <a name="how-it-works"></a>
@@ -13,7 +14,7 @@
 
 At the moment, Twitter doesn't have an API that allows you to fetch your bookmarks. Bookmarks are also only available through the mobile app, or by visiting the mobile version of Twitter's site (https://m.twitter.com). 
 
-To counter this, this tool uses Puppeteer to act as a user to log in to the mobile Twitter site, navigate to the bookmarks page (https://m.twitter.com/i/bookmarks), then scroll down continuously and scrape each tweet. The tool assumes tweets are wrapped in an ```<article />``` element.
+To work around this, this tool uses Puppeteer to act as a user to log in to the mobile Twitter site, navigate to the bookmarks page (https://m.twitter.com/i/bookmarks), then scroll down continuously and scrape each tweet. If there is an issue encountered as the tool scrolls for tweets, the tool will automatically click a "Try again" button to keep going. The tool assumes tweets are wrapped in an ```<article />``` element.
 
 <a name="requirements"></a>
 
@@ -23,37 +24,59 @@ To counter this, this tool uses Puppeteer to act as a user to log in to the mobi
 - `npm` >= 6.x
 
 
-<a name="install"></a>
+<a name="install-globally"></a>
 
-## Install
+## Install globally
 
-Clone the repo.
+Install as a global npm module.
 
 ```bash
-git clone https://github.com/helmetroo/extract-twitter-bookmarks.git 
+npm i -g https://github.com/helmetroo/extract-twitter-bookmarks.git
 ```
 
-Install required modules.
+<a name="install-locally"></a>
+
+## Install locally
+
+1. Clone this repo.
+
+```bash
+git clone https://github.com/helmetroo/extract-twitter-bookmarks.git
+```
+
+2. Install all required modules.
 
 ```bash
 npm i
 ```
 
+You can do it in one line.
+```bash
+git clone https://github.com/helmetroo/extract-twitter-bookmarks.git && npm i
+```
+
 <a name="usage"></a>
 
 ## Usage
+If installed globally, you can run it like:
+```
+extract-twitter-bookmarks --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME""
+```
+
+If you're inside the project folder, you can run it via one of two ways.
+```bash
+./bin/main.js -- --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME""
+```
 
 ```bash
 npm run start -- --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME""
 ```
 
-Begins scraping bookmarked tweets. 
-
-When finished, tweets are printed to STDOUT. If `fileName` is provided as an argument, the tool will save your fetched tweets to the file under the filename you provide. (see below).
+When finished, tweets are printed to STDOUT. If `fileName` is provided as an argument, the tool will save your fetched tweets to the file under the filename you provide (see `fileName` option below for how this works).
 
 | Parameter  | Description                                                                                                                                                                                                     |
 | :--        | :--                                                                                                                                                                                                             |
-| `username` | (required): Your Twitter phone, username or email.                                                                                                                                                              |
-| `password` | (required): Your Twitter password.                                                                                                                                                                              |
+| `username` | (optional): Your Twitter phone, username or email. If not provided as an argument, you'll be prompted for it.                                                                                                                                                     |
+| `password` | (optional): Your Twitter password. If not provided as an argument, you'll be prompted for it.                                                                                                           |
 | `maxLimit` | (optional): The maximum number of bookmarked tweets to fetch. Must be an integer. If not provided, the tool will fetch all the bookmarks it can, stopping when it can no longer scroll further for more tweets. |
 | `fileName` | (optional): The filename where the tool will export your fetched tweets to. Filenames can be absolute or relative. If relative, they will be resolved relative to your current working directory.                          |
