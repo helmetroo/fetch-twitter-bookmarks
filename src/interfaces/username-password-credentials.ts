@@ -1,4 +1,4 @@
 export default interface UsernamePasswordCredentials {
-    username: string;
-    password: string;
+    username: string | null;
+    password: string | null;
 }

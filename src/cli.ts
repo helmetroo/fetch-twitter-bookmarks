@@ -3,10 +3,12 @@ import minimist from 'minimist';
 import CommandLineArgs from './interfaces/command-line-args';
 import ValidCommandLineArgs from './interfaces/valid-command-line-args';
 import UsernamePasswordCredentials from './interfaces/username-password-credentials';
+import ValidUsernamePasswordCredentials from './interfaces/valid-username-password-credentials';
 import { MessageEvent } from './interfaces/progress-event-emitter';
 import Maybe from './interfaces/maybe';
 import ExtractionTaskOptions from './interfaces/extractor-task-options';
 
+import CredentialsPrompter from './credentials-prompter';
 import ProgressBar from './progress-bar';
 import ExtractionTask from './extraction-task';
 
@@ -22,7 +24,7 @@ export default class CommandLineInterface {
         'SIGHUP'
     ]
 
-    protected static getCommandLineArgs() {
+    protected static async getCommandLineArgs() {
         const cmdLineArgs = <CommandLineArgs> minimist(process.argv.slice(2), {
             string: [
                 'username',
@@ -40,21 +42,47 @@ export default class CommandLineInterface {
             }
         });
 
+        const credentials = await this.ensureCredentials(cmdLineArgs);
+        cmdLineArgs.username = credentials.username;
+        cmdLineArgs.password = credentials.password;
+
         return CommandLineInterface.validateCmdLineArgs(cmdLineArgs);
     }
 
-    protected static validateCmdLineArgs(cmdLineArgs: CommandLineArgs) {
-        const {
-            username,
-            password,
-            maxLimit,
-        } = cmdLineArgs;
+    protected static async ensureCredentials(cmdLineArgs: CommandLineArgs) {
+        const incomingCredentials: UsernamePasswordCredentials = {
+            username: cmdLineArgs.username,
+            password: cmdLineArgs.password
+        };
 
-        if(!username || !password) {
-            const noCredentialsErr = new Error('No credentials provided.');
-            throw noCredentialsErr;
+        const noUsername = !incomingCredentials.username;
+        const noPassword = !incomingCredentials.password;
+        const atLeastOneCredentialMissing = noUsername || noPassword;
+
+        if(atLeastOneCredentialMissing) {
+            const credentialsPrompter = new CredentialsPrompter();
+            return credentialsPrompter.prompt(incomingCredentials);
         }
 
+        const credentials: ValidUsernamePasswordCredentials = {
+            username: incomingCredentials.username,
+            password: incomingCredentials.password
+        };
+
+        return credentials;
+    }
+
+    protected static validateCmdLineArgs(cmdLineArgs: CommandLineArgs) {
+        this.validateMaxLimit(cmdLineArgs);
+
+        // TODO verify if chromePath was provided, check if it exists at provided path
+        return <ValidCommandLineArgs> cmdLineArgs;
+    }
+
+    protected static validateMaxLimit(cmdLineArgs: CommandLineArgs) {
+        const {
+            maxLimit,
+        } = cmdLineArgs;
         if(typeof maxLimit === 'string') {
             const notValidLimitErr = new Error('Invalid max limit. Must be an integer.');
             throw notValidLimitErr;
@@ -64,9 +92,6 @@ export default class CommandLineInterface {
             const notValidLimitErr = new Error('Invalid max limit. Must be an integer.');
             throw notValidLimitErr;
         }
-
-        // TODO verify if chromePath was provided, check if it exists at provided path
-        return <ValidCommandLineArgs> cmdLineArgs;
     }
 
     protected toExtractionTaskConfig(cmdLineArgs: ValidCommandLineArgs) {
@@ -76,9 +101,9 @@ export default class CommandLineInterface {
             fileName,
             maxLimit,
             chromePath
-        } = cmdLineArgs; 
+        } = cmdLineArgs;
 
-        const credentials: UsernamePasswordCredentials = {
+        const credentials: ValidUsernamePasswordCredentials = {
             username,
             password
         };
@@ -100,7 +125,7 @@ export default class CommandLineInterface {
         this.watchForStopSignal();
 
         const cmdLineArgs =
-            this.tryGetCommandLineArgs();
+            await this.tryGetCommandLineArgs();
 
         const extractionTaskConfig =
             this.toExtractionTaskConfig(cmdLineArgs);
@@ -116,11 +141,11 @@ export default class CommandLineInterface {
         extractionTask.run();
     }
 
-    protected tryGetCommandLineArgs() {
+    protected async tryGetCommandLineArgs() {
         let cmdLineArgs: ValidCommandLineArgs;
         try {
             cmdLineArgs =
-                CommandLineInterface.getCommandLineArgs();
+                await CommandLineInterface.getCommandLineArgs();
         } catch(err) {
             return this.exitWithError(err);
         }

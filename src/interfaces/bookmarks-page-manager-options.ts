@@ -1,7 +1,7 @@
-import UsernamePasswordCredentials from './username-password-credentials';
+import ValidUsernamePasswordCredentials from './username-password-credentials';
 
 export default interface PageManagerOptions {
-    credentials: UsernamePasswordCredentials;
+    credentials: ValidUsernamePasswordCredentials;
     chromePath: string | null;
     manualQuit: boolean:
 }

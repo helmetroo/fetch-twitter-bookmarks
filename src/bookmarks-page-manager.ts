@@ -5,7 +5,7 @@ import puppeteer, {
     LaunchOptions as PuppeteerLaunchOptions
 } from 'puppeteer';
 
-import UsernamePasswordCredentials from './interfaces/username-password-credentials';
+import ValidUsernamePasswordCredentials from './interfaces/valid-username-password-credentials';
 import ProgressEventEmitter from './interfaces/progress-event-emitter';
 import PageManagerOptions from './interfaces/bookmarks-page-manager-options';
 import LoginForm from './interfaces/login-form';
@@ -83,7 +83,7 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
 
     protected static async resolveBookmarksPage(
         browser: Browser,
-        credentials: UsernamePasswordCredentials,
+        credentials: ValidUsernamePasswordCredentials,
         newTab: boolean
     ) {
         const newPage =
@@ -119,7 +119,7 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
 
     protected static async logInIfStillAtLoginPage(
         currentPage: Page,
-        credentials: UsernamePasswordCredentials
+        credentials: ValidUsernamePasswordCredentials
     ) {
         const currentUrl = currentPage.url();
         const stillAtLogin =
@@ -134,7 +134,7 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
 
     protected static async login(
         loginPage: Page,
-        credentials: UsernamePasswordCredentials
+        credentials: ValidUsernamePasswordCredentials
     ) {
         const loginForm =
             await this.getLoginForm(loginPage);
@@ -167,7 +167,7 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
     protected static async loginWithCredentials(
         loginPage: Page,
         loginForm: LoginForm,
-        credentials: UsernamePasswordCredentials
+        credentials: ValidUsernamePasswordCredentials
     ) {
         const {
             usernameField,

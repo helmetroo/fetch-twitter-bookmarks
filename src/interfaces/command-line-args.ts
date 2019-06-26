@@ -1,8 +1,8 @@
 import { ParsedArgs } from 'minimist';
 
 export default interface CommandLineArgs extends ParsedArgs {
-    readonly username: string | null;
-    readonly password: string | null;
+    username: string | null;
+    password: string | null;
     readonly fileName: string | null;
     readonly maxLimit: string | number;
     readonly chromePath: string | null;

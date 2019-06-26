@@ -2,6 +2,13 @@
   "compilerOptions": {
     /* Basic Options */
     "target": "ES2018",                          /* Specify ECMAScript target version: 'ES3' (default), 'ES5', 'ES2015', 'ES2016', 'ES2017', 'ES2018', 'ES2019' or 'ESNEXT'. */
+    "baseUrl": "./",
+    "paths": {
+      "*": [
+          "node_modules/*",
+          "src/types/*"
+      ]
+    },
     "module": "commonjs",                     /* Specify module code generation: 'none', 'commonjs', 'amd', 'system', 'umd', 'es2015', or 'ESNext'. */
     "lib": [
       "esnext",
@@ -10,7 +17,7 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "strict": true,                           /* Enable all strict type-checking options. */
-    "moduleResolution": "node",            /* Specify module resolution strategy: 'node' (Node.js) or 'classic' (TypeScript pre-1.6). */
+    "moduleResolution": "node"            /* Specify module resolution strategy: 'node' (Node.js) or 'classic' (TypeScript pre-1.6). */
   },
   "include": [
      "src/**/*"
