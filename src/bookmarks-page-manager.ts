@@ -64,11 +64,13 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
     protected static getPuppeteerLaunchOptions(options: PageManagerOptions) {
         const {
             chromePath,
-            manualQuit
+            manualQuit,
+            inspect
         } = options;
 
         const handleSignals = !manualQuit;
         const puppeteerOptions: PuppeteerLaunchOptions = {
+            headless: !inspect,
             defaultViewport: null,
             handleSIGINT: handleSignals,
             handleSIGTERM: handleSignals,

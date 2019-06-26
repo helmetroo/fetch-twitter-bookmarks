@@ -9,6 +9,7 @@ export default interface TwitterBookmarksExtractionTaskOptions {
     readonly chromePath: string | null;
     readonly manualQuit: boolean;
     readonly silent: boolean;
+    readonly inspect: boolean;
     readonly successCallback: SuccessCallback;
     readonly errorCallback: ErrorCallback;
 }

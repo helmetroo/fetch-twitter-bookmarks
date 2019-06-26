@@ -35,6 +35,7 @@ export default class CommandLineInterface {
 
             boolean: [
                 'silent',
+                'inspect',
             ],
 
             default: {
@@ -43,7 +44,8 @@ export default class CommandLineInterface {
                 fileName: null,
                 maxLimit: Number.POSITIVE_INFINITY,
                 chromePath: null,
-                silent: false
+                silent: false,
+                inspect: false,
             }
         });
 
@@ -116,7 +118,8 @@ export default class CommandLineInterface {
             fileName,
             maxLimit,
             chromePath,
-            silent
+            silent,
+            inspect,
         } = cmdLineArgs;
 
         const credentials: ValidUsernamePasswordCredentials = {
@@ -130,6 +133,7 @@ export default class CommandLineInterface {
             maxLimit,
             chromePath,
             silent,
+            inspect,
             manualQuit: true,
             successCallback: this.stopAsComplete.bind(this),
             errorCallback: this.exitWithError.bind(this)

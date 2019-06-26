@@ -50,13 +50,15 @@ export default class ExtractionTask extends Progressable {
         const {
             credentials,
             chromePath,
-            manualQuit
+            manualQuit,
+            inspect,
         } = this.options;
 
         const pageManagerOptions: PageManagerOptions = {
             credentials,
             chromePath,
-            manualQuit
+            manualQuit,
+            inspect,
         }
 
         this.bookmarksPageManager =

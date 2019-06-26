@@ -60,16 +60,16 @@ git clone https://github.com/helmetroo/extract-twitter-bookmarks.git && npm i
 ## Usage
 If installed globally, you can run it like:
 ```
-extract-twitter-bookmarks --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME" --silent
+extract-twitter-bookmarks --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME" --silent --inspect
 ```
 
 If you're inside the project folder, you can run it via one of two ways.
 ```bash
-./bin/main.js -- --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME" --silent
+./bin/main.js -- --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME" --silent --inspect
 ```
 
 ```bash
-npm run start -- --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME" --silent
+npm run start -- --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME" --silent --inspect
 ```
 
 When finished, tweets are printed to STDOUT, unless you add the `silent` argument (see more information below). 
@@ -81,4 +81,5 @@ If `fileName` is provided as an argument, the tool will save your fetched tweets
 | `password` | (optional): Your Twitter password. If not provided as an argument, you'll be prompted for it.                                                                                                                   |
 | `maxLimit` | (optional): The maximum number of bookmarked tweets to fetch. Must be an integer. If not provided, the tool will fetch all the bookmarks it can, stopping when it can no longer scroll further for more tweets. |
 | `fileName` | (optional): The filename where the tool will export your fetched tweets to. Filenames can be absolute or relative. If relative, they will be resolved relative to your current working directory.               |
-| `silent`    | (optional): If provided, tweets will not be printed to STDOUT. You'll need to provide `fileName` if set.                                                                      |
+| `silent`   | (optional): If provided, tweets will not be printed to STDOUT. You'll need to provide `fileName` if set.                                                                                                        |
+| `inspect`   | (optional): If provided, the tool will force Puppeteer to open the browser so you can see what is happening as tweets are scraped.                              |
