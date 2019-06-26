@@ -60,23 +60,25 @@ git clone https://github.com/helmetroo/extract-twitter-bookmarks.git && npm i
 ## Usage
 If installed globally, you can run it like:
 ```
-extract-twitter-bookmarks --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME""
+extract-twitter-bookmarks --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME" --silent
 ```
 
 If you're inside the project folder, you can run it via one of two ways.
 ```bash
-./bin/main.js -- --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME""
+./bin/main.js -- --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME" --silent
 ```
 
 ```bash
-npm run start -- --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME""
+npm run start -- --username="$TWITTER_USERNAME" --password="$TWITTER_PASSWORD" --maxLimit=$MAX_LIMIT --fileName="$FILE_NAME" --silent
 ```
 
-When finished, tweets are printed to STDOUT. If `fileName` is provided as an argument, the tool will save your fetched tweets to the file under the filename you provide (see `fileName` option below for how this works).
+When finished, tweets are printed to STDOUT, unless you add the `silent` argument (see more information below). 
+If `fileName` is provided as an argument, the tool will save your fetched tweets to the file under the filename you provide (see `fileName` option below for how this works).
 
 | Parameter  | Description                                                                                                                                                                                                     |
 | :--        | :--                                                                                                                                                                                                             |
-| `username` | (optional): Your Twitter phone, username or email. If not provided as an argument, you'll be prompted for it.                                                                                                                                                     |
-| `password` | (optional): Your Twitter password. If not provided as an argument, you'll be prompted for it.                                                                                                           |
+| `username` | (optional): Your Twitter phone, username or email. If not provided as an argument, you'll be prompted for it.                                                                                                   |
+| `password` | (optional): Your Twitter password. If not provided as an argument, you'll be prompted for it.                                                                                                                   |
 | `maxLimit` | (optional): The maximum number of bookmarked tweets to fetch. Must be an integer. If not provided, the tool will fetch all the bookmarks it can, stopping when it can no longer scroll further for more tweets. |
-| `fileName` | (optional): The filename where the tool will export your fetched tweets to. Filenames can be absolute or relative. If relative, they will be resolved relative to your current working directory.                          |
+| `fileName` | (optional): The filename where the tool will export your fetched tweets to. Filenames can be absolute or relative. If relative, they will be resolved relative to your current working directory.               |
+| `silent`    | (optional): If provided, tweets will not be printed to STDOUT. You'll need to provide `fileName` if set.                                                                      |
