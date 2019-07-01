@@ -5,50 +5,20 @@ import puppeteer, {
     LaunchOptions as PuppeteerLaunchOptions
 } from 'puppeteer';
 
+import BookmarksPageProvider from './interfaces/bookmarks-page-provider';
 import ValidUsernamePasswordCredentials from './interfaces/valid-username-password-credentials';
-import ProgressEventEmitter from './interfaces/progress-event-emitter';
-import PageManagerOptions from './interfaces/bookmarks-page-manager-options';
+import PageProviderOptions from './interfaces/bookmarks-page-provider-options';
 import LoginForm from './interfaces/login-form';
 import Maybe from './interfaces/maybe';
 
-export default class BookmarksPageManager extends ProgressEventEmitter {
-    public static readonly CREATE_BROWSER: string = 'extractor:browser:create';
-    public static readonly BOOKMARKED_TWEETS_PAGE: string = 'extractor:page:load-bookmarks';
-    public static readonly CLOSE_BROWSER: string = 'extractor:browser:close';
-
-    public static readonly PROGRESS_EVENTS: string[] = [
-        BookmarksPageManager.CREATE_BROWSER,
-        BookmarksPageManager.BOOKMARKED_TWEETS_PAGE,
-        BookmarksPageManager.CLOSE_BROWSER
-    ];
-
-    protected launched: boolean = false;
-
-    protected browser: Maybe<Browser> = Maybe.none<Browser>();
-    protected bookmarksPage: Maybe<Page> = Maybe.none<Page>();
-
-    constructor(
-        protected options: PageManagerOptions
-    ) {
-        super();
+export default class PuppeteerBookmarksPageProvider extends BookmarksPageProvider {
+    protected async createBrowser() {
+        return this.options.mapAsync(options => {
+            return PuppeteerBookmarksPageProvider.tryCreateBrowser(options);
+        });
     }
 
-    public async open() {
-        const browser = await BookmarksPageManager.tryCreateBrowser(this.options);
-        this.browser = Maybe.fromValue(browser);
-        this.emitProgressEvent(BookmarksPageManager.CREATE_BROWSER);
-        this.launched = true;
-
-        const newTab = !this.options.chromePath;
-        const bookmarksPage =
-            await BookmarksPageManager.resolveBookmarksPage(browser, this.options.credentials, newTab);
-        this.bookmarksPage = Maybe.fromValue(bookmarksPage);
-        this.emitProgressEvent(BookmarksPageManager.BOOKMARKED_TWEETS_PAGE);
-
-        return bookmarksPage;
-    }
-
-    protected static async tryCreateBrowser(options: PageManagerOptions) {
+    protected static async tryCreateBrowser(options: PageProviderOptions) {
         const puppeteerLaunchOpts =
             this.getPuppeteerLaunchOptions(options);
 
@@ -61,7 +31,19 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
         }
     }
 
-    protected static getPuppeteerLaunchOptions(options: PageManagerOptions) {
+    protected async resolveBookmarksPage() {
+        return this.options.mapAsync(async (options) => {
+            const newTab = !options.chromePath;
+            const bookmarksPage =
+                await PuppeteerBookmarksPageProvider.loadBookmarksPage(
+                    browser, options.credentials, newTab
+                );
+
+            return bookmarksPage;
+        });
+    }
+
+    protected static getPuppeteerLaunchOptions(options: PageProviderOptions) {
         const {
             chromePath,
             manualQuit,
@@ -83,7 +65,7 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
         return puppeteerOptions;
     }
 
-    protected static async resolveBookmarksPage(
+    protected static async loadBookmarksPage(
         browser: Browser,
         credentials: ValidUsernamePasswordCredentials,
         newTab: boolean
@@ -208,33 +190,5 @@ export default class BookmarksPageManager extends ProgressEventEmitter {
         await credentialField.type(credential, {
             delay: 20
         });
-    }
-
-    public async close() {
-        try {
-            if(!this.launched)
-                return;
-
-            const hasChromePath =
-                !!this.options.chromePath;
-
-            await (hasChromePath)
-                ? BookmarksPageManager.closeBookmarksPage(this.bookmarksPage)
-                : BookmarksPageManager.closeBrowser(this.browser);
-        } catch(err) {
-            this.emitMessageEvent('Failed to terminate browser properly.');
-        } finally {
-            this.emitProgressEvent(BookmarksPageManager.CLOSE_BROWSER);
-        }
-    }
-
-    protected static async closeBrowser(browser: Maybe<Browser>) {
-        await browser
-            .mapAsync(async (browser) => await browser.close());
-    }
-
-    protected static async closeBookmarksPage(bookmarksPage: Maybe<Page>) {
-        await bookmarksPage
-            .mapAsync(async (page) => await page.close());
     }
 }

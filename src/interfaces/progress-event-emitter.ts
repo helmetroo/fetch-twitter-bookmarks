@@ -1,7 +1,11 @@
 import { EventEmitter } from 'events';
 import StrictEventEmitter from 'strict-event-emitter-types';
+import { injectable as Injectable, decorate as Decorate } from 'inversify';
 
 import EventCompleteRatio from './event-complete-ratio';
+
+// Line below necessary to work with inversify. :( See https://github.com/inversify/InversifyJS/issues/997#issuecomment-491808863
+Object.getPrototypeOf(EventEmitter.prototype).constructor = Object;
 
 interface ProgressEvents {
     progress: (event: ProgressEvent) => void;
@@ -16,6 +20,8 @@ type StrictProgressEventEmitter
 const ExtendableProgressEventEmitter =
     (EventEmitter as { new(): StrictProgressEventEmitter });
 
+Decorate(Injectable(), EventEmitter);
+@Injectable()
 export default abstract class ProgressEventEmitter extends ExtendableProgressEventEmitter {
     protected emitProgressEvent(name: string, eventCompleteRatio?: EventCompleteRatio) {
         const progressEvent = new ProgressEvent(name, eventCompleteRatio);

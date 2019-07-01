@@ -2,6 +2,7 @@ import { Page } from 'puppeteer';
 import { OrderedSet } from 'immutable';
 import { from, Subscription, Observer, Observable } from 'rxjs';
 import { scan, takeWhile, switchMap } from 'rxjs/operators';
+import { inject as Inject } from 'inversify';
 
 import Tweet from './interfaces/tweet';
 import TweetSet from './interfaces/tweet-set';
@@ -10,17 +11,22 @@ import ProgressEventEmitter, {
 } from './interfaces/progress-event-emitter';
 import Progressable from './interfaces/progressable';
 import ErrorCallback from './interfaces/error-callback';
-import PageManagerOptions from './interfaces/bookmarks-page-manager-options';
+import BookmarksPageProviderOptions from './interfaces/bookmarks-page-provider-options';
 import TaskOptions from './interfaces/extractor-task-options';
 import Maybe from './interfaces/maybe';
 import EventCompleteRatio from './interfaces/event-complete-ratio';
 
-import Extractor from './extractor';
-import BookmarksPageManager from './bookmarks-page-manager';
+import TweetsExtractor from './tweets-extractor';
+import BookmarksPageProvider from './interfaces/bookmarks-page-provider';
 
 import Exporter from './exporters/exporter';
 import JSONExporter from './exporters/json';
 import StdOutExporter from './exporters/std-out';
+
+import TYPE_TOKENS from './tokens/all';
+const {
+    BookmarksPageProvider: BookmarksPageProviderToken
+} = TYPE_TOKENS;
 
 export default class ExtractionTask extends Progressable {
     public static readonly COMPLETE_MESSAGE: string = 'Finished extracting tweets.';
@@ -36,15 +42,19 @@ export default class ExtractionTask extends Progressable {
         ExtractionTask.EXPORT_TWEETS
     ];
 
-    protected bookmarksPageManager: BookmarksPageManager;
-    protected extractor: Extractor;
+    @Inject(BookmarksPageProviderToken)
+    protected readonly bookmarksPageProvider!: BookmarksPageProvider
+
+    protected extractor: TweetsExtractor;
 
     protected eventForwarder: Subscription = new Subscription();
     protected tweetStream: Subscription = new Subscription();
 
     protected tweets: TweetSet = OrderedSet();
 
-    constructor(protected options: TaskOptions) {
+    constructor(
+        protected options: TaskOptions
+    ) {
         super();
 
         const {
@@ -54,24 +64,21 @@ export default class ExtractionTask extends Progressable {
             inspect,
         } = this.options;
 
-        const pageManagerOptions: PageManagerOptions = {
+        const pageManagerOptions: BookmarksPageProviderOptions = {
             credentials,
             chromePath,
             manualQuit,
             inspect,
         }
 
-        this.bookmarksPageManager =
-            new BookmarksPageManager(pageManagerOptions);
-
-        this.extractor = new Extractor();
-
-        this.pipeEventsFrom(this.bookmarksPageManager);
+        this.bookmarksPageProvider.setOptions(pageManagerOptions);
+        this.extractor = new TweetsExtractor();
+        this.pipeEventsFrom(this.bookmarksPageProvider);
     }
 
     public get numEvents() {
         const pageManagerEvents =
-            BookmarksPageManager.PROGRESS_EVENTS.length;
+            BookmarksPageProvider.PROGRESS_EVENTS.length;
 
         let taskSpecificEvents =
             ExtractionTask.PROGRESS_EVENTS.length - 1;
@@ -87,7 +94,7 @@ export default class ExtractionTask extends Progressable {
 
     public run() {
         const bookmarksPage$ =
-            from(this.bookmarksPageManager.open());
+            from(this.bookmarksPageProvider.open());
 
         const tweets$ = bookmarksPage$.pipe(
             switchMap((page: Page) => <Observable<TweetSet>> this.extractor.extract(page)),
@@ -159,7 +166,7 @@ export default class ExtractionTask extends Progressable {
                 await ExtractionTask.printTweetsToStdOut(tweetsArray);
         }
 
-        await this.bookmarksPageManager.close();
+        await this.bookmarksPageProvider.close();
     }
 
     protected emitStopMessage(completed: boolean) {

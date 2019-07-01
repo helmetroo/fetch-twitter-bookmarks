@@ -10,12 +10,14 @@ import TweetMap, { TweetMapHashCode, TweetMapEquals } from './interfaces/tweet-m
 import TweetSet from './interfaces/tweet-set';
 import Maybe from './interfaces/maybe';
 
-class TwitterBookmarksExtractor {
+import extractText from './utils/extract-text';
+
+export default class TweetsExtractor {
     public extract(bookmarks: Page) {
         const observableExtractor =
             new Observable<TweetSet>((subscriber: Subscriber<TweetSet>) => {
                 const ensureContainers =
-                    from(TwitterBookmarksExtractor.ensureTweetContainersOnPage(bookmarks, subscriber));
+                    from(TweetsExtractor.ensureTweetContainersOnPage(bookmarks, subscriber));
 
                 const thenExtractTweets =
                     switchMap(() => this.extractTweetsFromPage(bookmarks, subscriber));
@@ -53,12 +55,12 @@ class TwitterBookmarksExtractor {
             }
 
             const extractedTweets =
-                await TwitterBookmarksExtractor.extractTweetsFromContainers(tweetContainers);
+                await TweetsExtractor.extractTweetsFromContainers(tweetContainers);
             const extractedTweetsSet = OrderedSet(extractedTweets);
             subscriber.next(extractedTweetsSet);
 
             const continueScrolling =
-                await TwitterBookmarksExtractor.scrollForMoreTweets(bookmarks);
+                await TweetsExtractor.scrollForMoreTweets(bookmarks);
             if(!continueScrolling) {
                 subscriber.complete();
                 break;
@@ -89,20 +91,19 @@ class TwitterBookmarksExtractor {
         if(!tweetContainer)
             return null;
 
-        // TODO Critical info about the tweet (id, profile) comes from here
-        // We may want to discard this tweetContainer if we can't extract this information
-        const links =
-            await this.extractTweetLinks(tweetContainer);
+        let id: string;
+        try {
+            id = await this.extractTweetId(tweetContainer);
+        } catch(err) {
+            // Invalid tweet! ID must be defined.
+            return null;
+        }
 
-        const tweetUrl = urlParse(links.toTweet);
-        const tweetId = Maybe.fromValue(tweetUrl.path)
-            .map(path => path.split('/'))
-            .map(splitPath => splitPath[splitPath.length - 1])
-            .getOrElse('');
+        const date =
+            await this.extractTweetDate(tweetContainer);
 
-        const profileUrl = urlParse(links.toProfile);
-        const profile = Maybe.fromValue(profileUrl.path)
-            .getOrElse(' ').substr(1);
+        const profile =
+            await this.extractTweetProfile(tweetContainer);
 
         const text =
             await this.extractTweetText(tweetContainer);
@@ -110,55 +111,86 @@ class TwitterBookmarksExtractor {
         const media =
             await this.extractTweetMedia(tweetContainer);
 
-        const date =
-            await this.extractTweetDate(tweetContainer);
+        const embeddedLinkUrl =
+            await this.extractEmbeddedTweetLink(tweetContainer);
+
+        const profileUrl = `https://twitter.com/${profile}`;
+        const tweetUrl = `https://twitter.com/${profile}/status/{id}`;
+        const links: TweetLinks = {
+            toProfile: profileUrl,
+            toTweet: tweetUrl,
+            embedded: embeddedLinkUrl
+        };
 
         const tweet: Tweet = {
-            id: tweetId,
+            id,
+            date,
             profile,
             text,
-            date,
+            media,
             links,
-            media
         };
 
         return tweet;
     }
 
-    protected static async extractTweetLinks(articleTweet: ElementHandle<Element>) {
-        const tweetHrefs =
-            await articleTweet.$$eval(
-                'a',
-                links => links.map(link => (<HTMLAnchorElement> link).href)
-            );
-
-        const toProfile = Maybe
-            .fromValue(tweetHrefs[0])
-            .getOrElse('');
-
-        const toTweet = Maybe
-            .fromValue(tweetHrefs[2])
-            .getOrElse('');
-
-        const embedded: string | null =
-            tweetHrefs[3] || null;
-
-        const tweetLinks: TweetLinks = {
-            toProfile,
-            toTweet,
-            embedded
-        };
-
-        return tweetLinks;
+    protected static async extractTweetId(tweetContainer: ElementHandle<Element>) {
+        return tweetContainer.$eval(
+            'a:nth-child(3)',
+            link => {
+                const href = (<HTMLAnchorElement> link).href;
+                const hrefSplit = href.split('/');
+                const id = hrefSplit[hrefSplit.length - 1];
+                return id;
+            }
+        );
     }
 
-    protected static async extractTweetText(articleTweet: ElementHandle<Element>) {
-        const tweetTextContainer = await articleTweet.$('div[lang]');
+    protected static async extractTweetDate(tweetContainer: ElementHandle<Element>) {
+        let tweetDate = '';
+        try {
+            const foundTweetDate = await tweetContainer.$eval(
+                'time',
+                timeElement => (<HTMLTimeElement> timeElement).dateTime
+            );
+
+            tweetDate = Maybe
+                .fromValue(foundTweetDate)
+                .getOrElse('');
+        } catch(err) {}
+
+        return tweetDate;
+    }
+
+    protected static async extractTweetProfile(tweetContainer: ElementHandle<Element>) {
+        return tweetContainer.$eval(
+            'a:first-child',
+            link => {
+                const href = (<HTMLAnchorElement> link).href;
+                const profile = href.substr(1);
+                return profile;
+            }
+        );
+    }
+
+    protected static async extractEmbeddedTweetLink(tweetContainer: ElementHandle<Element>) {
+        try {
+            return tweetContainer.$eval(
+                'div[data-testid="tweet"] a[target="_blank"]:last-child',
+                link => (<HTMLAnchorElement> link).href
+            );
+        } catch(err) {
+            return null;
+        }
+    }
+
+    protected static async extractTweetText(tweetContainer: ElementHandle<Element>) {
+        const tweetTextContainer = await tweetContainer.$('div[lang]');
         const tweetTextsFetch = await Maybe.fromValue(tweetTextContainer)
             .mapAsync(async (container) => {
                 return container.$$eval(
                     'div[lang] > *',
-                    this.createTextExtractor(),
+                    extractText
                 );
             });
 
@@ -167,38 +199,15 @@ class TwitterBookmarksExtractor {
         return tweetText;
     }
 
-    protected static createTextExtractor() {
-        const textExtractor = (blocks: Element[]) =>
-            blocks.map(
-                (block: Element) => {
-                    const textBlock = <HTMLElement> block;
-
-                    const text = textBlock.textContent;
-                    if(!text) {
-                        const emojiTextDiv = textBlock.querySelector('div');
-                        if(!emojiTextDiv)
-                            return '';
-
-                        const emojiText = emojiTextDiv.getAttribute('aria-label') || '';
-                        return emojiText;
-                    }
-
-                    return text;
-                }
-            );
-
-        return textExtractor;
-    }
-
-    protected static async extractTweetMedia(articleTweet: ElementHandle<Element>) {
-        const tweetImageHrefs = await articleTweet.$$eval(
+    protected static async extractTweetMedia(tweetContainer: ElementHandle<Element>) {
+        const tweetImageHrefs = await tweetContainer.$$eval(
             '[alt="Image"]',
             links => links.map(link => (<HTMLImageElement> link).src)
         );
 
         let tweetVideoHref: string | null = null;
         try {
-            tweetVideoHref = await articleTweet.$eval(
+            tweetVideoHref = await tweetContainer.$eval(
                 'video',
                 video => (<HTMLVideoElement> video).src
             );
@@ -210,22 +219,6 @@ class TwitterBookmarksExtractor {
         };
 
         return tweetMedia;
-    }
-
-    protected static async extractTweetDate(articleTweet: ElementHandle<Element>) {
-        let tweetDate = '';
-        try {
-            const foundTweetDate = await articleTweet.$eval(
-                'time',
-                (timeElement) => (<HTMLTimeElement> timeElement).dateTime
-            );
-
-            tweetDate = Maybe
-                .fromValue(foundTweetDate)
-                .getOrElse('');
-        } catch(err) {}
-
-        return tweetDate;
     }
 
     protected static async scrollForMoreTweets(bookmarks: Page) {
@@ -273,5 +266,3 @@ class TwitterBookmarksExtractor {
         return continueScrolling;
     }
 }
-
-export default TwitterBookmarksExtractor;

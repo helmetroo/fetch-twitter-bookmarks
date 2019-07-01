@@ -1,4 +1,4 @@
-import ValidUsernamePasswordCredentials from './username-password-credentials';
+import ValidUsernamePasswordCredentials from './valid-username-password-credentials';
 import SuccessCallback from './success-callback';
 import ErrorCallback from './error-callback';
 
