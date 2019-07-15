@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-require('ts-node').register();
+require('tsconfig-paths').register();
 
-const CommandLineInterface = require('../src/cli.ts').default;
-const cli = new CommandLineInterface();
-cli.run();
+require('../src/app-interfaces/command-line-interface.ts');

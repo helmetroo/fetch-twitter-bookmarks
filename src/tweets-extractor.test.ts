@@ -1,5 +1,4 @@
-import { from, Subscription, Observer, Observable } from 'rxjs';
-import { scan, switchMap } from 'rxjs/operators';
+import { scan } from 'rxjs/operators';
 import { Arg } from '@fluffy-spoon/substitute';
 
 import TweetSet from './interfaces/tweet-set';

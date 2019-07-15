@@ -5,6 +5,21 @@ import { OrderedSet, Map, List, fromJS } from 'immutable';
 import { Observable, Subscriber, defer, pipe, from } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 
+import Selectors, { SelectorsObject } from './constants/selectors';
+const {
+    TweetArticle,
+    Tweet,
+    TweetId,
+    TweetTime,
+    TweetProfile,
+    TweetEmbeddedLink,
+    TweetText,
+    TweetTextBlocks,
+    TweetImage,
+    TweetVideo,
+    TwitterButton
+} = Selectors;
+
 import Tweet, { TweetLinks, TweetMedia } from './interfaces/tweet';
 import TweetMap, { TweetMapHashCode, TweetMapEquals } from './interfaces/tweet-map';
 import TweetSet from './interfaces/tweet-set';
@@ -35,7 +50,7 @@ export default class TweetsExtractor {
 
     protected static async ensureTweetContainersOnPage(bookmarks: Page, subscriber: Subscriber<TweetSet>) {
         try {
-            await bookmarks.waitForSelector('article');
+            await bookmarks.waitForSelector(TweetArticle);
         } catch(err) {
             // TODO wrap original err in the one below; create separate error classes
             const noTweetsAvailableErr = new Error(
@@ -48,7 +63,7 @@ export default class TweetsExtractor {
 
     protected async extractTweetsFromPage(bookmarks: Page, subscriber: Subscriber<TweetSet>) {
         while(true) {
-            const tweetContainers = await bookmarks.$$('article');
+            const tweetContainers = await bookmarks.$$(TweetArticle);
             if(tweetContainers.length === 0) {
                 subscriber.complete();
                 break;
@@ -87,7 +102,7 @@ export default class TweetsExtractor {
     }
 
     protected static async extractTweetFromContainer(articleContainer: ElementHandle<Element>) {
-        const tweetContainer = await articleContainer.$('div[data-testid="tweet"]');
+        const tweetContainer = await articleContainer.$(Tweet);
         if(!tweetContainer)
             return null;
 
@@ -136,7 +151,7 @@ export default class TweetsExtractor {
 
     protected static async extractTweetId(tweetContainer: ElementHandle<Element>) {
         return tweetContainer.$eval(
-            'a:nth-child(3)',
+            TweetId,
             link => {
                 const href = (<HTMLAnchorElement> link).href;
                 const hrefSplit = href.split('/');
@@ -150,7 +165,7 @@ export default class TweetsExtractor {
         let tweetDate = '';
         try {
             const foundTweetDate = await tweetContainer.$eval(
-                'time',
+                TweetTime,
                 timeElement => (<HTMLTimeElement> timeElement).dateTime
             );
 
@@ -164,7 +179,7 @@ export default class TweetsExtractor {
 
     protected static async extractTweetProfile(tweetContainer: ElementHandle<Element>) {
         return tweetContainer.$eval(
-            'a:first-child',
+            TweetProfile,
             link => {
                 const href = (<HTMLAnchorElement> link).href;
                 const profile = href.substr(1);
@@ -176,7 +191,7 @@ export default class TweetsExtractor {
     protected static async extractEmbeddedTweetLink(tweetContainer: ElementHandle<Element>) {
         try {
             return tweetContainer.$eval(
-                'div[data-testid="tweet"] a[target="_blank"]:last-child',
+                TweetEmbeddedLink,
                 link => (<HTMLAnchorElement> link).href
             );
         } catch(err) {
@@ -185,11 +200,11 @@ export default class TweetsExtractor {
     }
 
     protected static async extractTweetText(tweetContainer: ElementHandle<Element>) {
-        const tweetTextContainer = await tweetContainer.$('div[lang]');
+        const tweetTextContainer = await tweetContainer.$(TweetText);
         const tweetTextsFetch = await Maybe.fromValue(tweetTextContainer)
             .mapAsync(async (container) => {
                 return container.$$eval(
-                    'div[lang] > *',
+                    TweetTextBlocks,
                     extractText
                 );
             });
@@ -201,14 +216,14 @@ export default class TweetsExtractor {
 
     protected static async extractTweetMedia(tweetContainer: ElementHandle<Element>) {
         const tweetImageHrefs = await tweetContainer.$$eval(
-            '[alt="Image"]',
+            TweetImage,
             links => links.map(link => (<HTMLImageElement> link).src)
         );
 
         let tweetVideoHref: string | null = null;
         try {
             tweetVideoHref = await tweetContainer.$eval(
-                'video',
+                TweetVideo,
                 video => (<HTMLVideoElement> video).src
             );
         } catch(err) {}
@@ -226,21 +241,26 @@ export default class TweetsExtractor {
 
         try {
             continueScrolling =
-                await bookmarks.evaluate(async () => {
+                await bookmarks.evaluate(async (selectors: SelectorsObject) => {
+                    const {
+                        TweetArticle,
+                        TwitterButton
+                    } = selectors;
+
                     const scrollingElement = document.scrollingElement;
                     if(!scrollingElement)
                         return false;
 
                     const preScrollTop = scrollingElement.scrollTop;
 
-                    const articleElements = document.querySelectorAll('article');
+                    const articleElements = document.querySelectorAll(TweetArticle);
                     const lastArticleElement = articleElements[articleElements.length - 1];
                     lastArticleElement.scrollIntoView();
 
                     await new Promise(res => setTimeout(res, 500));
                     const postScrollTop = scrollingElement.scrollTop;
 
-                    const allButtons = document.querySelectorAll('div[role="button"]');
+                    const allButtons = document.querySelectorAll(TwitterButton);
                     const tryAgainButton = <HTMLElement | undefined>
                         Array.from(allButtons).filter(
                             elem => elem.textContent === 'Try again'
@@ -258,9 +278,7 @@ export default class TweetsExtractor {
                     const scrolledDown = preScrollTop !== postScrollTop;
 
                     return notReachedEnd && scrolledDown;
-                }, {
-                    timeout: 5000
-                });
+                }, Selectors);
         } catch(err) {}
 
         return continueScrolling;

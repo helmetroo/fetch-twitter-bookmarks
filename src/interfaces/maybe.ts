@@ -50,4 +50,12 @@ export default class Maybe<T> {
         const resolvedValue = await f(this.value);
         return Maybe.fromValue(resolvedValue);
     }
+
+    public async flatMapAsync<R>(f: (wrapped: T) => Promise<Maybe<R>>): Promise<Maybe<R>> {
+        if (isNil(this.value))
+            return Maybe.none<R>();
+
+        const resolvedValue = await f(this.value);
+        return resolvedValue;
+    }
 }

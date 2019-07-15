@@ -1,4 +1,4 @@
-import Tweet from '../interfaces/tweet';
+import Tweet from '@interfaces/tweet';
 
 import FileExporter from './file';
 

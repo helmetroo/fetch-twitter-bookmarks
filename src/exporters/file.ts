@@ -5,7 +5,7 @@ import {
     close as closeFile
 } from 'fs';
 
-import Tweet from '../interfaces/tweet';
+import Tweet from '@interfaces/tweet';
 import Exporter from './exporter';
 
 export default abstract class FileExporter extends Exporter {

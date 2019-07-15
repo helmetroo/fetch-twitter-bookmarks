@@ -2,12 +2,28 @@
   "compilerOptions": {
     /* Basic Options */
     "target": "ES2018",                          /* Specify ECMAScript target version: 'ES3' (default), 'ES5', 'ES2015', 'ES2016', 'ES2017', 'ES2018', 'ES2019' or 'ESNEXT'. */
-    "baseUrl": "./",
+    "baseUrl": "src",
     "paths": {
       "*": [
-          "node_modules/*",
-          "src/types/*"
-      ]
+          "../node_modules/*",
+          "types/*"
+      ],
+      "@app-interfaces/*": ["app-interfaces/*"],
+      "@args/*": ["args/*"],
+      "@args-parsers/*": ["args-parsers/*"],
+      "@args-validators/*": ["args-validators/*"],
+      "@args-retrievers/*": ["args-retrievers/*"],
+      "@bookmarks-page-providers/*": ["bookmarks-page-providers/*"],
+      "@config/*": ["config/*"],
+      "@constants/*": ["constants/*"],
+      "@credentials-prompters/*": ["credentials-prompters/*"],
+      "@exporters/*": ["exporters/*"],
+      "@extraction-task/*": ["extraction-task/*"],
+      "@interfaces/*": ["interfaces/*"],
+      "@ioc-containers/*": ["ioc-containers/*"],
+      "@ioc-tokens": ["ioc-tokens/index"],
+      "@utils/*": ["utils/*"],
+      "@validators/*": ["validators/*"]
     },
     "module": "commonjs",                     /* Specify module code generation: 'none', 'commonjs', 'amd', 'system', 'umd', 'es2015', or 'ESNext'. */
     "lib": [
@@ -22,6 +38,6 @@
     "emitDecoratorMetadata": true
   },
   "include": [
-     "src/**/*"
+     "**/*"
   ]
 }
