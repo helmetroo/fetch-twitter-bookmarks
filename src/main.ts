@@ -1,4 +1,4 @@
-import CommandLineInterface from './cli';
+import CommandLineInterface from './interfaces/cli';
 
-const cli = new CommandLineInterface();
-cli.run();
+const clInterface = new CommandLineInterface();
+clInterface.start();
