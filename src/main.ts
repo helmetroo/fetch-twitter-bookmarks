@@ -1,4 +1,4 @@
-import CommandLineInterface from './interfaces/cli';
+import CommandLineFrontend from './frontends/cli';
 
-const clInterface = new CommandLineInterface();
-clInterface.start();
+const clFrontend = new CommandLineFrontend();
+clFrontend.start();

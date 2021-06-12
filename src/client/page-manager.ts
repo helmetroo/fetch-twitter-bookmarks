@@ -1,56 +1,8 @@
 import { URL } from 'url';
-import { stringify } from 'querystring';
+import type { Browser, BrowserType, BrowserContext, Page } from 'playwright';
 
-import { Browser, BrowserType, BrowserContext, Page } from 'playwright';
-
+import { Twitter } from '../constants/twitter';
 import Credentials from './credentials';
-
-export const PATHNAMES = {
-    loggedOut: '/',
-    logIn: '/login',
-    logInError: '/login/error',
-    logOut: '/logout',
-    bookmarks: '/i/bookmarks',
-    challengeCode: '/account/login_challenge',
-    twoFaCode: '/account/2fa_challenge', // TODO probably NOT correct path!!!
-};
-
-const TWITTER_URL = 'https://twitter.com';
-
-function buildTwitterUrlWithOpts(def: Partial<URL>) {
-    const twitterUrlDef = new URL(TWITTER_URL);
-    Object.assign(twitterUrlDef, def);
-
-    return twitterUrlDef.toString();
-}
-
-const BOOKMARKS_REDIRECT_SEARCH_PARAMS = stringify({
-    redirect_after_login: PATHNAMES.bookmarks
-});
-
-const LOGIN_URL_WITH_BOOKMARKS_REDIRECT = buildTwitterUrlWithOpts({
-    pathname: PATHNAMES.logIn,
-    search: BOOKMARKS_REDIRECT_SEARCH_PARAMS
-});
-
-const LOGOUT_URL = buildTwitterUrlWithOpts({
-    pathname: PATHNAMES.logOut
-});
-
-const LOGIN_PAGE_SELECTORS = {
-    usernameInput: 'input[name="session[username_or_email]"]',
-    passwordInput: 'input[name="session[password]"]',
-    submitButton: 'div[data-testid="LoginForm_Login_Button"]'
-};
-
-const CONFIRMATION_CODE_PAGE_SELECTORS = {
-    codeInput: 'input[name="challenge_response"]',
-    submitButton: 'input[type="submit"]'
-};
-
-const LOGOUT_PAGE_SELECTORS = {
-    confirmButton: 'div[data-testid="confirmationSheetConfirm"]'
-};
 
 export default class PageManager {
     protected active: boolean = false;
@@ -76,10 +28,12 @@ export default class PageManager {
         return currentUrl.pathname === path;
     }
 
-    async refreshWithBookmarksRedirect() {
-        const currentUrl = new URL(this.curPage!.url());
-        currentUrl.search = BOOKMARKS_REDIRECT_SEARCH_PARAMS;
-        await this.curPage!.goto(currentUrl.toString());
+    waitForRequest(pathnameRegex: RegExp) {
+        return this.curPage!.waitForRequest(pathnameRegex);
+    }
+
+    waitForResponse(pathnameRegex: RegExp) {
+        return this.curPage!.waitForResponse(pathnameRegex);
     }
 
     async logIn(credentials: Credentials) {
@@ -87,22 +41,23 @@ export default class PageManager {
             usernameInput,
             passwordInput,
             submitButton
-        } = LOGIN_PAGE_SELECTORS;
+        } = Twitter.Selectors.LOGIN_PAGE;
 
-        await this.curPage!.goto(LOGIN_URL_WITH_BOOKMARKS_REDIRECT);
-        await this.curPage!.type(usernameInput, credentials.username);
-        await this.curPage!.type(passwordInput, credentials.password);
-        await this.curPage!.click(submitButton);
+        await this.curPage?.goto(Twitter.Url.LOGIN);
+        await this.curPage?.type(usernameInput, credentials.username);
+        await this.curPage?.type(passwordInput, credentials.password);
+        await this.curPage?.click(submitButton);
+        await this.curPage?.waitForNavigation();
     }
 
     async enterConfirmationCode(code: string) {
         const {
             codeInput,
             submitButton
-        } = CONFIRMATION_CODE_PAGE_SELECTORS;
+        } = Twitter.Selectors.CONFIRMATION_CODE_PAGE;
 
-        await this.curPage!.type(codeInput, code);
-        await this.curPage!.click(submitButton);
+        await this.curPage?.type(codeInput, code);
+        await this.curPage?.click(submitButton);
     }
 
     // TODO only keep if these pages are drastically different. If not, should refactor
@@ -110,15 +65,21 @@ export default class PageManager {
         const {
             codeInput,
             submitButton
-        } = CONFIRMATION_CODE_PAGE_SELECTORS;
+        } = Twitter.Selectors.CONFIRMATION_CODE_PAGE;
 
-        await this.curPage!.type(codeInput, code);
-        await this.curPage!.click(submitButton);
+        await this.curPage?.type(codeInput, code);
+        await this.curPage?.click(submitButton);
+    }
+
+    async goToBookmarksPage() {
+        await this.curPage?.goto(Twitter.Url.BOOKMARKS, {
+            waitUntil: 'domcontentloaded'
+        });
     }
 
     async logOut() {
-        await this.curPage!.goto(LOGOUT_URL);
-        await this.curPage!.click(LOGOUT_PAGE_SELECTORS.confirmButton);
+        await this.curPage?.goto(Twitter.Url.LOGOUT);
+        await this.curPage?.click(Twitter.Selectors.LOGOUT_PAGE.confirmButton);
     }
 
     async tearDown() {

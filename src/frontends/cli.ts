@@ -6,12 +6,13 @@ import Client from '../client/client';
 import type { ClientEvents, ClientEventKey } from '../client/client';
 import type Credentials from '../client/credentials';
 
-export default class CommandLineInterface {
+export default class CommandLineFrontend {
     protected app: Vorpal;
     protected client: Client;
 
     protected setBrowserCommand?: Vorpal.Command;
     protected loginCommand?: Vorpal.Command;
+    protected fetchBookmarksCommand?: Vorpal.Command;
     protected endCommand?: Vorpal.Command;
 
     constructor() {
@@ -75,7 +76,7 @@ export default class CommandLineInterface {
         this.setBrowserCommand?.remove();
     }
 
-    protected onRequestSetBrowser(cli: CommandLineInterface) {
+    protected onRequestSetBrowser(cli: CommandLineFrontend) {
         return async function(this: Vorpal.CommandInstance, args: Vorpal.Args) {
             const browserName = <string> args.name;
 
@@ -111,11 +112,12 @@ export default class CommandLineInterface {
         this.loginCommand?.remove();
     }
 
-    protected onRequestLogin(cli: CommandLineInterface) {
-        return async function(this: Vorpal.CommandInstance, args: Vorpal.Args) {
+    protected onRequestLogin(cli: CommandLineFrontend) {
+        return async function(this: Vorpal.CommandInstance) {
             const events: Partial<ClientEvents> = {
                 success: () => {
                     cli.disableLoginCommand();
+                    cli.enableFetchBookmarksCommand();
                     cli.logMessage(this)('Successfully logged in!');
                 },
                 internalError: cli.logMessage(this),
@@ -141,6 +143,36 @@ export default class CommandLineInterface {
         await this.client.logIn(credentials);
     }
 
+    protected enableFetchBookmarksCommand() {
+        this.fetchBookmarksCommand = this.app
+            .command('fetch', 'Begins fetching bookmarks.')
+            .alias('start')
+            .action(this.onRequestFetchBookmarks(this));
+    }
+
+    protected disableFetchBookmarksCommand() {
+        this.fetchBookmarksCommand?.remove();
+    }
+
+    protected onRequestFetchBookmarks(cli: CommandLineFrontend) {
+        return async function(this: Vorpal.CommandInstance) {
+            const events: Partial<ClientEvents> = {
+                success: () => {
+                    cli.disableFetchBookmarksCommand();
+                    cli.logMessage(this)('Initial bookmarks fetched');
+                },
+                internalError: cli.logMessage(this)
+            };
+
+            cli.subscribeToClientEvents(events);
+            await cli.startFetchingBookmarks();
+        }
+    }
+
+    async startFetchingBookmarks() {
+        await this.client.startFetchingBookmarks();
+    }
+
     protected enableEndCommand() {
         this.endCommand = this.app
             .command('end', 'Closes the browser.')
@@ -152,8 +184,8 @@ export default class CommandLineInterface {
         this.endCommand?.remove();
     }
 
-    protected onRequestEnd(cli: CommandLineInterface) {
-        return async function(this: Vorpal.CommandInstance, args: Vorpal.Args) {
+    protected onRequestEnd(cli: CommandLineFrontend) {
+        return async function(this: Vorpal.CommandInstance) {
             const events: Partial<ClientEvents> = {
                 success: () => {
                     cli.disableLoginCommand();

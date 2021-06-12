@@ -2,6 +2,6 @@
 
 require('ts-node').register();
 
-const CommandLineInterface = require('../src/interfaces/cli.ts').default;
-const cli = new CommandLineInterface();
+const CommandLineFrontend = require('../src/frontends/cli.ts').default;
+const cli = new CommandLineFrontend();
 cli.run();
