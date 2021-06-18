@@ -32,7 +32,7 @@ export namespace Twitter {
         });
 
         export const BOOKMARKS = buildTwitterUrlWithOpts({
-            pathname: PATHNAMES.bookmarks,
+            pathname: PATHNAMES.bookmarks
         });
 
         export const LOGOUT = buildTwitterUrlWithOpts({
@@ -101,6 +101,20 @@ export namespace Twitter {
             message: string;
         };
 
+        export interface SearchParams {
+            count: number;
+            cursor?: string;
+            withHighlightedLabel: boolean; // false
+            withTweetQuoteCount: boolean; // false
+            includePromotedContent: boolean; // true
+            withTweetResult: boolean; // true
+            withReactions: boolean; // false
+            withSuperFollowsTweetFields: boolean; // false
+            withUserResults: boolean; // false
+            withNonLegacyCard: boolean; // true
+            withBirdwatchPivots: boolean; // false
+        }
+
         export interface TimelineInstructions {
             'type': 'TimelineAddEntries';
             entries: TimelineEntries;
@@ -110,7 +124,7 @@ export namespace Twitter {
             ...TweetEntry[],
             CursorTopEntry,
             CursorBottomEntry
-        ];
+        ]
 
         export interface TimelineEntry {
             entryId: string;
@@ -142,6 +156,7 @@ export namespace Twitter {
         }
 
         // entryId begins with "cursor-top" | "cursor-bottom".
+        // stopOnEmptyResponse seems to be always true if present?
         export interface CursorEntry extends TimelineEntry {
             content: {
                 entryType: 'TimelineTimelineCursor';
@@ -162,34 +177,40 @@ export namespace Twitter {
             };
         }
 
+        // base64 encoded; follows pattern "Entity:number"
         export interface Schema {
-            id: string; // base64 encoded; follows pattern "Entity:number"
+            id: string;
             rest_id: string;
         }
 
         export interface Tweet {
             created_at: string; // Date
+            id_str: string;
             conversation_id_str: string;
+            user_id_str: string;
             display_text_range: number[];
             entities: {
                 media: Media[];
-                user_mentions: unknown[];
-                urls: unknown[];
-                hashtags: unknown[];
-                symbols: unknown[];
+                user_mentions: Mention[];
+                urls: EmbeddedURL[];
+                hashtags: Tag[];
+                symbols: Tag[];
+            };
+            extended_entities?: {
+                media: Media[];
             };
             favorite_count: number;
             favorited: boolean;
             full_text: string;
             is_quote_status: boolean;
             lang: string;
+            possibly_sensitive: boolean;
+            possibly_sensitive_editable: boolean;
             reply_count: number;
             retweet_count: number;
-            retweeted: false;
+            retweeted: boolean;
             source: string; // valid HTML
-            user_id_str: string;
-            id_str: string;
-            self_thread: {
+            self_thread?: {
                 id_str: string;
             };
         }
@@ -219,7 +240,7 @@ export namespace Twitter {
                     urls: EmbeddedURL[];
                 };
 
-                url: {
+                url?: {
                     urls: EmbeddedURL[];
                 };
             };
@@ -248,22 +269,35 @@ export namespace Twitter {
             'protected': boolean;
             screen_name: string;
             statuses_count: number;
-            translator_type: string;
+            translator_type: 'none' | 'regular' | string;
             url: string;
             verified: boolean;
             want_retweets: boolean;
             withheld_in_countries: unknown[];
-        };
+        }
 
         export interface Media extends EmbeddedURL {
+            id_str: string;
+            media_key?: string;
             media_url_https: string;
-            type: 'photo' | string;
-            url: string;
+            type: 'photo' | 'video' | 'animated_gif' | string;
+            additional_media_info?: {
+                monetizable?: boolean;
+            };
+            ext_media_color?: {
+                palette: Color[];
+            };
+            ext_media_availability?: {
+                status: string;
+            };
             features: {
-                small: MediaFeature;
-                medium: MediaFeature;
-                large: MediaFeature;
-                orig: MediaFeature;
+                small?: MediaFeature;
+                medium?: MediaFeature;
+                large?: MediaFeature;
+                orig?: MediaFeature;
+            };
+            mediaStats?: {
+                viewCount: number;
             };
             sizes: {
                 large: ResizeInfo;
@@ -274,26 +308,37 @@ export namespace Twitter {
             original_info: {
                 height: number;
                 width: number;
-                focus_rects: Box[];
+                focus_rects?: Box[];
             };
-        };
+            video_info?: {
+                aspect_ratio: number[];
+                duration_millis: number[];
+                variants: MediaVariant[];
+            };
+        }
 
         export interface MediaFeature {
             faces: Box[]
-        };
+        }
+
+        export interface MediaVariant {
+            bitrate: number;
+            content_type: string;
+            url: string;
+        }
 
         export interface Box {
             x: number;
             y: number;
             h: number;
             w: number;
-        };
+        }
 
         export interface ResizeInfo {
             h: number;
             w: number;
             resize: 'fit' | 'crop' | string;
-        };
+        }
 
         export interface MediaColor {
             r: {
@@ -301,7 +346,7 @@ export namespace Twitter {
                     palette: Color[];
                 }
             }
-        };
+        }
 
         export interface Color {
             percentage: number;
@@ -310,6 +355,18 @@ export namespace Twitter {
                 green: number;
                 blue: number;
             };
-        };
+        }
+
+        export interface Mention {
+            id_str: string;
+            name: string;
+            screen_name: string;
+            indices: number[];
+        }
+
+        export interface Tag {
+            text: string;
+            indices: number[];
+        }
     }
 }
