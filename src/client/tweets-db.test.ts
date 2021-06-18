@@ -128,6 +128,15 @@ function createFakeTweet() {
     return tweet;
 }
 
+function createFakeCursor() {
+    const cursor: Application.Cursor = {
+        top: faker.datatype.number(1e17).toString(),
+        bottom: faker.datatype.number(1e17).toString()
+    };
+
+    return cursor;
+}
+
 const TEST_DB_PATH = rootPathTo('test-twitter-bookmarks.db');
 const DEFAULT_DB_PATH = TweetsDB.Database.DEFAULT_DATABASE_PATH;
 const TEMP_DEFAULT_DB_PATH = `${DEFAULT_DB_PATH}.tmp`;
@@ -220,5 +229,22 @@ describe('TweetsDB', () => {
         expect(savedAuthorJson).toMatchObject(newTweet.author);
 
         await db.shutDown();
+    });
+
+    it('Should allow cursor state to be persisted and later retrieved', async () => {
+        const db = new TweetsDB.Database({
+            inMemory: true,
+            logging: false
+        });
+        await db.init();
+
+        const cursor = createFakeCursor();
+        await db.persistCursorState(cursor);
+
+        const persistedCursor = await db.getCursorState();
+        expect(persistedCursor).not.toBeNull();
+
+        const persistedCursorJson = persistedCursor!.toJSON();
+        expect(persistedCursorJson).toMatchObject(cursor);
     });
 });

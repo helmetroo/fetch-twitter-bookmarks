@@ -565,7 +565,12 @@ export namespace TweetsDB {
             }
         }
 
-        async updateCursorState(cursor: Application.Cursor) {
+        async getCursorState() {
+            // There should only be one
+            return CursorState.findOne();
+        }
+
+        async persistCursorState(cursor: Application.Cursor) {
             const upsertTxn = await this.db.transaction();
 
             await CursorState.upsert(cursor);
