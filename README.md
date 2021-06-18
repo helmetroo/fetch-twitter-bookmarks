@@ -1,10 +1,10 @@
 # fetch-twitter-bookmarks
 
-**Interactive CLI application that fetches your Twitter bookmarks and saves them to a file**
+**Interactive CLI application that fetches your Twitter bookmarks and saves them to a SQLite database**
 
 * **[Goals](#goals)**
 * **[How it works](#how-it-works)**
-* **[Notes](#notes)**
+* **[Important](#important)**
 * **[How to use](#how-to-use)**
   * **[Requirements](#requirements)**
   * **[Installation](#installation)**
@@ -36,10 +36,12 @@ The URL pattern for accessing these resources through this API is
 
 The query parameter `variables` is url-encoded JSON, and represents the query parameters. For convenience, and to doubly make sure the tool presents like a browser to Twitter, the very same parameters the bookmarks page already passes to the query are used.
 
-<a name="notes"></a>
-# Notes
+<a name="important"></a>
+# IMPORTANT
 
-Because this application uses a headless browser to pretend to be you to log in on your behalf, you'll receive login notifications like the ones I did below. This is expected. When you run [tests](#testing), you may see several of these.
+This project is in flux and breaking changes are anticipated until I decide to cut version 1.0.0.
+
+Because this application uses a headless browser to pretend to be you to log in on your behalf, you'll receive login notifications like the ones I did below. When you run [tests](#testing), you'll probably see several of these.
 
 ![Login notifications](./images/login-notifications.png)
 
@@ -105,7 +107,7 @@ npm test
 <a name="initial-approach"></a>
 # Initial approach
 
-An earlier method used a scraper-based approach entirely with Puppeteer to visit the bookmarks page on your behalf, continuously scrolling down and scraping encountered tweets, assuming Twitter always wrapped them in `<article />` elements. To see how that worked and the implementation for that approach, [take a look here](https://github.com/helmetroo/fetch-twitter-bookmarks/tree/1232e7aa308e65e8b80f6fbf4bf928575194edf1). I decided that approach was far too malleable and complex.
+An earlier method used a scraper-based approach entirely with Puppeteer to visit the bookmarks page on your behalf, continuously scrolling down and scraping encountered tweets, assuming Twitter always wrapped them in `<article />` elements. To see how that worked and the implementation for that approach, [take a look here](https://github.com/helmetroo/fetch-twitter-bookmarks/tree/1232e7aa308e65e8b80f6fbf4bf928575194edf1). I decided that was far too malleable and complex.
 
 <a name="feedback"></a>
 # Feedback
