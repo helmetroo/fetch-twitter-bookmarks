@@ -15,7 +15,6 @@ import {
 import rootPathTo from '../utils/root-path-to';
 import { Application } from '../constants/application';
 import { Twitter } from '../constants/twitter';
-import { DEFAULT_ENCODING } from 'crypto';
 
 export namespace TweetsDB {
     interface SequelizeTimestamped {
