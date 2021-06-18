@@ -18,6 +18,7 @@
         "saved"
     ],
     "dependencies": {
+        "app-root-path": "^3.0.0",
         "playwright": "^1.11.1",
         "rxjs": "^7.1.0",
         "superagent": "^6.1.0",
@@ -27,6 +28,7 @@
     "devDependencies": {
         "@jest/types": "^27.0.2",
         "@tsconfig/node14": "^1.0.0",
+        "@types/app-root-path": "^1.2.4",
         "@types/jest": "^24.0.15",
         "@types/node": "^14",
         "@types/superagent": "^4.1.11",
