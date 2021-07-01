@@ -1,16 +1,20 @@
 import { URL } from 'url';
-import { writeFile } from 'fs';
 
 import { BrowserType, chromium, firefox, webkit } from 'playwright';
 import { TypedEmitter } from 'tiny-typed-emitter';
 
+import fetchAvailableBrowsers from '../utils/fetch-available-browsers';
 import { Twitter } from '../constants/twitter';
 import Credentials from './credentials';
 import PageManager from './page-manager';
-import BookmarksRequester from './bookmarks-requester';
+import DataExtractor from './data-extractor';
+import { TweetsDB } from './tweets-db';
+import { BookmarksRequester } from './bookmarks-requester';
 
-interface NameToBrowserType {
-    [key: string]: BrowserType
+
+export type BrowserName = 'chromium' | 'firefox' | 'webkit';
+type NameToBrowserType = {
+    [key in BrowserName]: BrowserType
 };
 
 const NAME_TO_BROWSER: NameToBrowserType = {
@@ -20,83 +24,133 @@ const NAME_TO_BROWSER: NameToBrowserType = {
 }
 
 export enum State {
-    Inactive,
-    LoggedOut,
-    Needs2FACode,
-    NeedsConfirmationCode,
-    LoggedIn
+    NotReady = 'NotReady',
+    LoggedOut = 'LoggedOut',
+    LoggedIn = 'LoggedIn',
+    FetchingBookmarks = 'FetchingBookmarks'
+}
+
+export enum ErrorType {
+    Internal,
+    User
 }
 
 export interface ClientEvents {
-    actionRequired: (message: string) => void;
-    internalError: (message: string, ...rest: string[]) => void;
-    userError: (message: string, ...rest: string[]) => void;
-    success: () => void;
+    notice: (message: string) => void;
+    actionRequired: (reason: string) => void;
+    error: (type: ErrorType, message: string, ...rest: string[]) => void;
+    transition: (oldState: State, newState: State) => void;
 }
 
 export type ClientEventKey = keyof ClientEvents;
 
 export default class Client extends TypedEmitter<ClientEvents> {
+    protected availableBrowserNames: string[];
+
     protected pageManager: PageManager;
-    protected pageManagerReady: boolean = false;
+    protected db: TweetsDB.Database;
 
-    protected bookmarksRequester: BookmarksRequester;
-
-    protected state: State = State.LoggedOut;
+    protected currentState: State = State.NotReady;
     protected lastAuthAttemptFailed: boolean = false;
     protected lastCodeAttemptFailed: boolean = false;
 
+    get availableBrowserNamesQuoted() {
+        return this.availableBrowserNames
+            .map(name => `"${name}"`)
+            .join(', ');
+    }
+
+    get state() {
+        return this.currentState;
+    }
+
+    protected set state(newState: State) {
+        const prevState = this.currentState;
+        this.currentState = newState;
+
+        this.emit('transition', prevState, newState);
+    }
+
+    get notReady() {
+        return this.state === State.NotReady;
+    }
+
     get loggedOut() {
-        return this.state === State.LoggedOut
-            || this.needsConfirmationCode
-            || this.needs2FACode
+        return this.state === State.LoggedOut;
     }
 
     get loggedIn() {
         return this.state === State.LoggedIn;
     }
 
-    get needsConfirmationCode() {
-        return this.state === State.NeedsConfirmationCode;
-    }
-
-    get needs2FACode() {
-        return this.state === State.Needs2FACode;
-    }
-
     constructor() {
         super();
 
+        // TODO allow frontends to config
+        this.db = new TweetsDB.Database({
+            inMemory: false,
+            logging: false
+        });
         this.pageManager = new PageManager();
-        this.bookmarksRequester = new BookmarksRequester();
+        this.availableBrowserNames = [];
+    }
+
+    protected emitNotice(message: string) {
+        this.emit('notice', message);
+    }
+
+    protected emitUserError(message: string) {
+        this.emit('error', ErrorType.User, message);
+    }
+
+    protected emitInternalError(message: string) {
+        this.emit('error', ErrorType.Internal, message);
+    }
+
+    protected emitActionRequired(reason: string) {
+        this.emit('actionRequired', reason);
     }
 
     protected assertPageManagerReady() {
-        const errorMessage = [
-            'Page manager had not been initialized correctly.',
-            'The page manager is necessary to sign in on your behalf to Twitter and begin the process of fetching bookmarks.'
-        ].join('');
+        if(this.notReady) {
+            const errorMessage = [
+                'Page manager had not been initialized correctly.',
+                'The page manager is necessary to sign in on your behalf to Twitter and start the process of fetching bookmarks.'
+            ].join('');
 
-        if(!this.pageManagerReady)
-            this.emit('internalError', errorMessage);
+            this.emitInternalError(errorMessage);
+        }
     }
 
-    async init(browserName: string) {
+    async determineAvailableBrowsers() {
+        const availableBrowsers = await fetchAvailableBrowsers();
+        this.availableBrowserNames = availableBrowsers.map(browser => browser.name);
+        this.emitNotice(`Available browsers to use: ${this.availableBrowserNamesQuoted}.`);
+        return this.availableBrowserNames;
+    }
+
+    async initBrowser(browserName: BrowserName) {
         const browserType = NAME_TO_BROWSER[browserName];
         if(!browserType) {
-            this.emit('userError', 'Please choose from "chromium", "webkit", or "firefox".');
+            this.emitUserError(`Please choose from ${this.availableBrowserNamesQuoted}.`);
             return;
         }
 
         this.pageManager.setBrowserType(browserType);
         await this.pageManager.init();
-        this.pageManagerReady = true;
-        this.emit('success');
+        this.emitNotice(`Browser set to ${browserName} and initialized.`);
+
+        this.state = State.LoggedOut;
+    }
+
+    async initDb() {
+        await this.db.init();
+        this.emitNotice('Bookmarks database ready.');
     }
 
     async logIn(credentials: Credentials) {
-        if(!this.pageManagerReady) {
-            this.emit('internalError', `The browser hasn't been initialized yet.`);
+        if(this.notReady) {
+            this.emitInternalError(`The browser hasn't been initialized yet.`);
             return;
         }
 
@@ -106,7 +160,7 @@ export default class Client extends TypedEmitter<ClientEvents> {
             return this.handleLoginIssue();
 
         this.state = State.LoggedIn;
-        this.emit('success');
+        this.emitNotice('Successfully logged in.');
     }
 
     protected async handleLoginIssue() {
@@ -116,14 +170,12 @@ export default class Client extends TypedEmitter<ClientEvents> {
         } = Twitter.Url.PATHNAMES;
 
         if(this.pageManager.currentUrlHasPath(challengeCode)) {
-            this.state = State.NeedsConfirmationCode;
-            this.emit('actionRequired', 'Your confirmation code is necessary to proceed.');
+            this.emitActionRequired('Your confirmation code is necessary to proceed.');
         } else if(this.pageManager.currentUrlHasPath(twoFaCode)) {
-            this.state = State.Needs2FACode;
-            this.emit('actionRequired', 'Your 2FA code is necessary to proceed. Please check your device.');
+            this.emitActionRequired('Your 2FA code is necessary to proceed. Please check your device.');
         } else {
             this.lastAuthAttemptFailed = true;
-            this.emit('userError', 'Your credentials were incorrect.');
+            this.emitUserError('Your credentials were incorrect.');
         }
     }
 
@@ -134,8 +186,10 @@ export default class Client extends TypedEmitter<ClientEvents> {
         await this.pageManager.enterConfirmationCode(code);
         if(this.pageManager.currentUrlHasPath(Twitter.Url.PATHNAMES.challengeCode)) {
             this.lastCodeAttemptFailed = true;
-            this.emit('userError', 'Your challenge code was incorrect.');
+            this.emitUserError('Your challenge code was incorrect.');
         }
+
+        this.emitNotice('Successfully logged in.');
     }
 
     async enterTwoFactorCode(code: string) {
@@ -145,69 +199,94 @@ export default class Client extends TypedEmitter<ClientEvents> {
         await this.pageManager.enterTwoFactorCode(code);
         if(this.pageManager.currentUrlHasPath(Twitter.Url.PATHNAMES.twoFaCode)) {
             this.lastCodeAttemptFailed = true;
-            this.emit('userError', 'Your 2FA code was incorrect.');
+            this.emitUserError('Your 2FA code was incorrect.');
         }
+
+        this.emitNotice('Successfully logged in.');
     }
 
     async startFetchingBookmarks() {
         await this.pageManager.goToBookmarksPage();
-        await this.handleInitialBookmarksRequests();
-        this.emit('success');
+
+        // TODO allow user to retry (by refreshing the page and waiting for the req/res pair again)
+        const config = await this.createBookmarksRequesterConfig();
+        if(config)
+            this.startBookmarksRequesterWorker(config);
     }
 
-    protected async handleInitialBookmarksRequests() {
+    protected async createBookmarksRequesterConfig(): Promise<BookmarksRequester.Config | undefined> {
         const bookmarksPathnameRegex = Twitter.Url.PATH_REGEXES.bookmarks;
         const [req, res] = await Promise.all([
             this.pageManager.waitForRequest(bookmarksPathnameRegex),
             this.pageManager.waitForResponse(bookmarksPathnameRegex)
         ]);
 
-        const reqHeaders = <Twitter.Api.RequestHeader> (req!.headers() as unknown);
+        const reqHeader = <Twitter.Api.RequestHeader> (req!.headers() as unknown);
         const reqUrl = new URL(req!.url());
-        const reqSearchParams = reqUrl.searchParams;
 
         const resBody = <Twitter.Api.Response> await res.json();
         const resBodyAsError = <Twitter.Api.ErrorResponse> resBody;
         if(resBodyAsError.errors) {
             const errorMessage = resBodyAsError.errors[0].message;
-            this.emit('internalError', `Unable to fetch bookmarks. Reason given by Twitter: ${errorMessage}`);
+            this.emitInternalError(`Unable to fetch bookmarks. Reason given by Twitter: ${errorMessage}`);
             return;
         }
 
-        this.bookmarksRequester.init(
-            reqHeaders,
-            reqSearchParams,
-            <Twitter.Api.SuccessResponse> resBody
-        );
-
-        // To test what we have working so far
-        const bookmarks = this.bookmarksRequester.bookmarks;
-        const serializedBookmarks = JSON.stringify({ bookmarks });
-        writeFile('./bookmarks.json', serializedBookmarks, 'utf8', _ => {});
+        const dataExtractor = new DataExtractor(<Twitter.Api.SuccessResponse> resBody);
+        const initialCursor = dataExtractor.cursor.bottom;
+        const initialBookmarks = dataExtractor.tweets;
+        return {
+            reqUrl,
+            reqHeader,
+            initialCursor,
+            initialBookmarks
+        };
     }
 
-    async logOut(emitEvent: boolean = true) {
-        if(!this.pageManagerReady)
+    protected startBookmarksRequesterWorker(config: BookmarksRequester.Config) {
+        // const boilerplate = [
+        //     'require("tsconfig-paths/register")',
+        //     'require("ts-node/register")',
+        //     'require(require("worker_threads").workerData.sourceFile)'
+        // ].join('\r\n');
+
+        // this.bookmarksRequesterWorker = new Worker(boilerplate, {
+        //     eval: true,
+        //     workerData: {
+        //         ...config,
+        //         sourceFile: './bookmarks-requester-thread.ts'
+        //     }
+        // });
+
+        // this.bookmarksRequesterWorker.on('message', () => {});
+        // this.bookmarksRequesterWorker.on('error', () => {});
+        // this.bookmarksRequesterWorker.on('exit', () => {});
+    }
+
+    protected async stopBookmarksRequesterWorker() {
+        //this.bookmarksRequesterWorker?.postMessage('stop');
+    }
+
+    async logOut() {
+        if(this.notReady)
             return;
 
         await this.pageManager.logOut();
 
         if(this.pageManager.currentUrlHasPath(Twitter.Url.PATHNAMES.loggedOut)) {
             this.state = State.LoggedOut;
-            if(emitEvent)
-                this.emit('success');
             return;
         }
 
-        console.warn('Not at logged out page!');
         //throw new Error('Logout failed.');
     }
 
-    async tearDown() {
+    async shutDown() {
         if(this.loggedIn)
-            await this.logOut(false);
+            await this.logOut();
 
         await this.pageManager.tearDown();
-        this.emit('success');
+        await this.db.shutDown();
+        this.state = State.NotReady;
     }
 }

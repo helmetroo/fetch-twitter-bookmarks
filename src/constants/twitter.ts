@@ -1,5 +1,4 @@
 import { URL } from 'url';
-import { stringify } from 'querystring';
 
 export namespace Twitter {
     export namespace Url {
