@@ -7,7 +7,7 @@ testSuiteFor('Client', ({ name: browserName }) => {
         const client = new Client();
 
         expect(async () => await client.init(browserName)).not.toThrow();
-        expect(async () => await client.shutDown()).not.toThrow();
+        expect(async () => await client.end()).not.toThrow();
     });
 
     it('Should not be logged in after providing incorrect credentials', async () => {
@@ -16,7 +16,7 @@ testSuiteFor('Client', ({ name: browserName }) => {
         await client.init(browserName);
         await client.logIn(INVALID_CREDENTIALS);
         const clientLoggedIn = client.loggedIn;
-        await client.shutDown();
+        await client.end();
 
         expect(clientLoggedIn).toBeFalsy();
     });
@@ -29,7 +29,7 @@ testSuiteFor('Client', ({ name: browserName }) => {
 
         await client.init(browserName);
         await client.logIn(INVALID_CREDENTIALS);
-        await client.shutDown();
+        await client.end();
 
         expect(loginFailureEvent).toBeCalledTimes(1);
     });
@@ -59,7 +59,7 @@ testSuiteFor('Client', ({ name: browserName }) => {
         await client.init(browserName);
         await client.logIn(validCredentials);
         const clientLoggedIn = client.loggedIn;
-        await client.shutDown();
+        await client.end();
 
         expect(clientLoggedIn).toBeTruthy();
     });

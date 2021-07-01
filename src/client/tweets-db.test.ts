@@ -150,7 +150,7 @@ describe('TweetsDB', () => {
 
         expect(async () => {
             await db.init();
-            await db.shutDown();
+            await db.close();
         }).not.toThrow();
     });
 
@@ -165,7 +165,7 @@ describe('TweetsDB', () => {
 
         const db = new TweetsDB.Database();
         await db.init();
-        await db.shutDown();
+        await db.close();
 
         expect(async () => {
             await access(DEFAULT_DB_PATH, constants.F_OK);
@@ -183,7 +183,7 @@ describe('TweetsDB', () => {
             logging: false
         });
         await db.init();
-        await db.shutDown();
+        await db.close();
 
         expect(async () => {
             await access(TEST_DB_PATH, constants.F_OK);
@@ -202,7 +202,7 @@ describe('TweetsDB', () => {
         await db.init();
         expect(logFn).toBeCalled();
 
-        await db.shutDown();
+        await db.close();
     });
 
     it('Should allow tweets and their authors to be saved and later retrieved', async () => {
@@ -228,7 +228,7 @@ describe('TweetsDB', () => {
         const savedAuthorJson = savedAuthor!.toJSON();
         expect(savedAuthorJson).toMatchObject(newTweet.author);
 
-        await db.shutDown();
+        await db.close();
     });
 
     it('Should allow cursor state to be persisted and later retrieved', async () => {

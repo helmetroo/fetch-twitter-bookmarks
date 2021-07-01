@@ -1,16 +1,20 @@
 import { URL } from 'url';
+import { writeFile as writeFileCb } from 'fs';
+import { promisify } from 'util';
 
 import { BrowserType, chromium, firefox, webkit } from 'playwright';
+import type { Request, Response } from 'playwright';
 import { TypedEmitter } from 'tiny-typed-emitter';
 
 import fetchAvailableBrowsers from '../utils/fetch-available-browsers';
+import { Application } from '../constants/application';
 import { Twitter } from '../constants/twitter';
+import { TwitterRequestError, ConnectionError } from '../constants/error';
 import Credentials from './credentials';
 import PageManager from './page-manager';
 import DataExtractor from './data-extractor';
 import { TweetsDB } from './tweets-db';
 import { BookmarksRequester } from './bookmarks-requester';
-
 
 export type BrowserName = 'chromium' | 'firefox' | 'webkit';
 type NameToBrowserType = {
@@ -44,17 +48,30 @@ export interface ClientEvents {
 
 export type ClientEventKey = keyof ClientEvents;
 
+const writeFile = promisify(writeFileCb);
+
 export default class Client extends TypedEmitter<ClientEvents> {
     protected availableBrowserNames: string[];
 
     protected pageManager: PageManager;
     protected db: TweetsDB.Database;
+    protected bookmarksRequester?: BookmarksRequester.Requester;
 
     protected currentState: State = State.NotReady;
+    protected loggedIn: boolean = false;
     protected lastAuthAttemptFailed: boolean = false;
     protected lastCodeAttemptFailed: boolean = false;
 
-    get availableBrowserNamesQuoted() {
+    get ready() {
+        return this.state !== State.NotReady;
+    }
+
+    get availableBrowserNamesByCommas() {
+        return this.availableBrowserNames
+            .join(', ');
+    }
+
+    get availableBrowserNamesInQuotes() {
         return this.availableBrowserNames
             .map(name => `"${name}"`)
             .join(', ');
@@ -69,18 +86,6 @@ export default class Client extends TypedEmitter<ClientEvents> {
         this.currentState = newState;
 
         this.emit('transition', prevState, newState);
-    }
-
-    get notReady() {
-        return this.state === State.NotReady;
-    }
-
-    get loggedOut() {
-        return this.state === State.LoggedOut;
-    }
-
-    get loggedIn() {
-        return this.state === State.LoggedIn;
     }
 
     constructor() {
@@ -112,7 +117,7 @@ export default class Client extends TypedEmitter<ClientEvents> {
     }
 
     protected assertPageManagerReady() {
-        if(this.notReady) {
+        if(!this.ready) {
             const errorMessage = [
                 'Page manager had not been initialized correctly.',
                 'The page manager is necessary to sign in on your behalf to Twitter and start the process of fetching bookmarks.'
@@ -125,20 +130,20 @@ export default class Client extends TypedEmitter<ClientEvents> {
     async determineAvailableBrowsers() {
         const availableBrowsers = await fetchAvailableBrowsers();
         this.availableBrowserNames = availableBrowsers.map(browser => browser.name);
-        this.emitNotice(`Available browsers to use: ${this.availableBrowserNamesQuoted}.`);
+        this.emitNotice(`Available browsers to use: ${this.availableBrowserNamesByCommas}.`);
         return this.availableBrowserNames;
     }
 
     async initBrowser(browserName: BrowserName) {
         const browserType = NAME_TO_BROWSER[browserName];
         if(!browserType) {
-            this.emitUserError(`Please choose from ${this.availableBrowserNamesQuoted}.`);
+            this.emitUserError(`Please choose from ${this.availableBrowserNamesInQuotes}.`);
             return;
         }
 
         this.pageManager.setBrowserType(browserType);
         await this.pageManager.init();
-        this.emitNotice(`Browser set to ${browserName} and initialized.`);
+        this.emitNotice(`Browser set to ${browserName} and initialized. You may now login.`);
 
         this.state = State.LoggedOut;
     }
@@ -148,8 +153,13 @@ export default class Client extends TypedEmitter<ClientEvents> {
         this.emitNotice('Bookmarks database ready.');
     }
 
+    async closeDb() {
+        await this.db.close();
+        this.emitNotice('Closed connection to bookmarks database.');
+    }
+
     async logIn(credentials: Credentials) {
-        if(this.notReady) {
+        if(!this.ready) {
             this.emitInternalError(`The browser hasn't been initialized yet.`);
             return;
         }
@@ -159,7 +169,12 @@ export default class Client extends TypedEmitter<ClientEvents> {
         if(!this.pageManager.currentUrlHasPath(Twitter.Url.PATHNAMES.home))
             return this.handleLoginIssue();
 
+        this.markLoggedIn();
+    }
+
+    protected markLoggedIn() {
         this.state = State.LoggedIn;
+        this.loggedIn = true;
         this.emitNotice('Successfully logged in.');
     }
 
@@ -189,7 +204,7 @@ export default class Client extends TypedEmitter<ClientEvents> {
             this.emitUserError('Your challenge code was incorrect.');
         }
 
-        this.emitNotice('Successfully logged in.');
+        this.markLoggedIn();
     }
 
     async enterTwoFactorCode(code: string) {
@@ -202,73 +217,110 @@ export default class Client extends TypedEmitter<ClientEvents> {
             this.emitUserError('Your 2FA code was incorrect.');
         }
 
-        this.emitNotice('Successfully logged in.');
+        this.markLoggedIn();
     }
 
     async startFetchingBookmarks() {
         await this.pageManager.goToBookmarksPage();
 
         // TODO allow user to retry (by refreshing the page and waiting for the req/res pair again)
-        const config = await this.createBookmarksRequesterConfig();
-        if(config)
-            this.startBookmarksRequesterWorker(config);
+        try {
+            const config = await this.generateRequesterConfig();
+            await this.persistInitialState(config.startCursor, config.initialBookmarks);
+            this.startRequester(config);
+        } catch(err) {
+            const errMessage = err.message;
+            this.emitInternalError(errMessage);
+        }
+
+        this.state = State.FetchingBookmarks;
     }
 
-    protected async createBookmarksRequesterConfig(): Promise<BookmarksRequester.Config | undefined> {
-        const bookmarksPathnameRegex = Twitter.Url.PATH_REGEXES.bookmarks;
-        const [req, res] = await Promise.all([
-            this.pageManager.waitForRequest(bookmarksPathnameRegex),
-            this.pageManager.waitForResponse(bookmarksPathnameRegex)
-        ]);
+    protected async persistInitialState(cursor: Application.Cursor, bookmarks: Application.Tweet[]) {
+        await this.db.persistCursorState(cursor);
+        await this.db.insertTweets(bookmarks);
+        this.emitNotice('Saved initial bookmarks and cursor to database.');
+    }
 
-        const reqHeader = <Twitter.Api.RequestHeader> (req!.headers() as unknown);
-        const reqUrl = new URL(req!.url());
+    protected async generateRequesterConfig() {
+        let req: Request;
+        let res: Response;
+        try {
+            const bookmarksPathnameRegex = Twitter.Url.PATH_REGEXES.bookmarks;
+            [req, res] = await Promise.all([
+                this.pageManager.waitForRequest(bookmarksPathnameRegex),
+                this.pageManager.waitForResponse(bookmarksPathnameRegex)
+            ]);
+        } catch(err) {
+            throw new ConnectionError('Could not connect to Twitter to fetch bookmarks. There may be a connection issue.');
+        }
+
+        return this.buildRequesterConfigFrom(req, res);
+    }
+
+    protected async buildRequesterConfigFrom(req: Request, res: Response): Promise<BookmarksRequester.ConfigWithBookmarks> {
+        const reqHeader = <Twitter.Api.RequestHeader> (req.headers() as unknown);
+        const reqUrl = new URL(req.url());
 
         const resBody = <Twitter.Api.Response> await res.json();
         const resBodyAsError = <Twitter.Api.ErrorResponse> resBody;
         if(resBodyAsError.errors) {
-            const errorMessage = resBodyAsError.errors[0].message;
-            this.emitInternalError(`Unable to fetch bookmarks. Reason given by Twitter: ${errorMessage}`);
-            return;
+            const twtrErrMessage = resBodyAsError.errors[0].message;
+            throw new TwitterRequestError(`Twitter gave an error attempting to fetch bookmarks. Message given: ${twtrErrMessage}`);
         }
 
         const dataExtractor = new DataExtractor(<Twitter.Api.SuccessResponse> resBody);
-        const initialCursor = dataExtractor.cursor.bottom;
+        const startCursor = dataExtractor.cursor;
         const initialBookmarks = dataExtractor.tweets;
         return {
             reqUrl,
             reqHeader,
-            initialCursor,
+            startCursor,
             initialBookmarks
         };
     }
 
-    protected startBookmarksRequesterWorker(config: BookmarksRequester.Config) {
-        // const boilerplate = [
-        //     'require("tsconfig-paths/register")',
-        //     'require("ts-node/register")',
-        //     'require(require("worker_threads").workerData.sourceFile)'
-        // ].join('\r\n');
+    protected startRequester(config: BookmarksRequester.Config) {
+        this.bookmarksRequester = new BookmarksRequester.Requester(config, this.db);
+        this.bookmarksRequester.start();
 
-        // this.bookmarksRequesterWorker = new Worker(boilerplate, {
-        //     eval: true,
-        //     workerData: {
-        //         ...config,
-        //         sourceFile: './bookmarks-requester-thread.ts'
-        //     }
-        // });
-
-        // this.bookmarksRequesterWorker.on('message', () => {});
-        // this.bookmarksRequesterWorker.on('error', () => {});
-        // this.bookmarksRequesterWorker.on('exit', () => {});
+        this.state = State.FetchingBookmarks;
     }
 
-    protected async stopBookmarksRequesterWorker() {
-        //this.bookmarksRequesterWorker?.postMessage('stop');
+    protected listenForRequesterEvents() {
+        this.bookmarksRequester?.on('fetched', this.notifyRequesterProgress.bind(this));
+        this.bookmarksRequester?.on('error', this.notifyRequesterError.bind(this));
+        this.bookmarksRequester?.on('end', this.notifyRequesterFinished.bind(this));
+    }
+
+    protected notifyRequesterError(message: string) {
+        this.emitInternalError(message);
+    }
+
+    protected notifyRequesterProgress(bookmarks: Application.Tweet[]) {
+        this.emitNotice(`${bookmarks.length} bookmarks have been fetched and saved to the database.`);
+    }
+
+    protected notifyRequesterFinished() {
+        this.emitNotice('No more bookmarks to fetch, the end may have been reached.');
+    }
+
+    stopFetchingBookmarks() {
+        this.bookmarksRequester?.stop();
+        this.state = State.LoggedIn;
+    }
+
+    async dumpBookmarks(filePath: string) {
+        // TODO if there are a lot to write, do we need to chunkify writing somehow?
+        const bookmarks = await this.db.getAllTweets();
+        const bookmarkObjs = bookmarks.map(bookmark => bookmark.toJSON());
+        const serializedBookmarks = JSON.stringify({ bookmarks: bookmarkObjs });
+        await writeFile(filePath, serializedBookmarks, 'utf8');
+        this.emitNotice(`${bookmarks.length} bookmarks have been successfully dumped to ${filePath}.`)
     }
 
     async logOut() {
-        if(this.notReady)
+        if(!this.ready)
             return;
 
         await this.pageManager.logOut();
@@ -278,15 +330,16 @@ export default class Client extends TypedEmitter<ClientEvents> {
             return;
         }
 
-        //throw new Error('Logout failed.');
+        this.emitInternalError('Although a logout attempt was made, you may not have been properly logged out.');
     }
 
-    async shutDown() {
+    async end() {
+        this.bookmarksRequester?.stop();
+
         if(this.loggedIn)
             await this.logOut();
 
         await this.pageManager.tearDown();
-        await this.db.shutDown();
         this.state = State.NotReady;
     }
 }

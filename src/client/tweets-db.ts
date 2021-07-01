@@ -582,6 +582,10 @@ export namespace TweetsDB {
             }
         }
 
+        async getAllTweets() {
+            return Tweet.findAll();
+        }
+
         async getTweetById(id: string) {
             return Tweet.findByPk(id);
         }
@@ -591,7 +595,7 @@ export namespace TweetsDB {
             return Author.findByPk(authorId);
         }
 
-        async shutDown() {
+        async close() {
             return this.db.close();
         }
     }

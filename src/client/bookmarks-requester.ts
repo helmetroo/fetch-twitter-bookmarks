@@ -11,8 +11,11 @@ export namespace BookmarksRequester {
     export interface Config {
         reqUrl: URL;
         reqHeader: Twitter.Api.RequestHeader;
-        initialCursor?: string;
-        initialBookmarks?: Application.Tweet[];
+        startCursor: Application.Cursor;
+    }
+
+    export interface ConfigWithBookmarks extends Config {
+        initialBookmarks: Application.Tweet[]
     }
 
     export interface RequesterEvents {
@@ -22,6 +25,7 @@ export namespace BookmarksRequester {
     }
 
     export class Requester extends TypedEmitter<RequesterEvents> {
+        protected cursor: Application.Cursor;
         protected reachedEnd: boolean = false;
         protected requestedStop: boolean = false;
 
@@ -42,11 +46,13 @@ export namespace BookmarksRequester {
             protected db: TweetsDB.Database
         ) {
             super();
+
+            this.cursor = config.startCursor;
         }
 
         start() {
-            const keepGoing = !this.atEnd && !this.stopped;
-            while(keepGoing) {
+            const canFetch = !this.atEnd && !this.stopped;
+            while(canFetch) {
                 this.requestBookmarks();
             }
         }
@@ -69,7 +75,7 @@ export namespace BookmarksRequester {
             const reqParams = reqUrl.searchParams;
             const reqSearchVars = <Twitter.Api.SearchParams>
                 JSON.parse(reqParams.get('variables')!);
-            reqSearchVars.cursor = this.cursor;
+            reqSearchVars.cursor = this.cursor.bottom;
             reqParams.set('variables', JSON.stringify(reqSearchVars));
 
             const reqUrlStr = reqUrl.toString();
@@ -79,26 +85,30 @@ export namespace BookmarksRequester {
             const resBodyAsError = <Twitter.Api.ErrorResponse> resBody;
             if(resBodyAsError.errors) {
                 const errorMessage = resBodyAsError.errors[0]!.message;
-                this.emit('error', `Unable to fetch bookmarks. Reason given by Twitter: ${errorMessage}`);
+                this.emit('error', `Unable to fetch additional bookmarks. Reason given by Twitter: ${errorMessage}`);
             }
 
-            return <Twitter.Api.SuccessResponse> res;
+            return <Twitter.Api.SuccessResponse> (res as unknown);
         }
 
         protected updateState(response: Twitter.Api.SuccessResponse) {
             const dataExtractor = new DataExtractor(response);
-            this.atEnd = this.cursor === dataExtractor.cursor.bottom;
+
+            const newCursor = dataExtractor.cursor;
+            const bookmarks = dataExtractor.tweets;
+            this.cursor = newCursor;
+            this.persistState(newCursor, bookmarks);
+
+            this.atEnd = (this.cursor.bottom === newCursor.bottom);
             if(this.atEnd) {
                 this.emit('end');
                 return;
             }
-
-            this.persistState(dataExtractor);
         }
 
-        protected async persistState(dataExtractor: DataExtractor) {
-            await this.db.persistCursorState(dataExtractor.cursor);
-            await this.db.insertTweets(dataExtractor.tweets);
+        protected async persistState(cursor: Application.Cursor, bookmarks: Application.Tweet[]) {
+            await this.db.persistCursorState(cursor);
+            await this.db.insertTweets(bookmarks);
         }
     }
 }

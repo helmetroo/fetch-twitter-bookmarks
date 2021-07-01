@@ -7,9 +7,11 @@ import type Credentials from '../client/credentials';
 abstract class Command {
     protected abstract readonly identifier: string;
     protected abstract readonly description: string;
-    protected abstract readonly action: Vorpal.Action;
+    protected readonly action: Vorpal.Action = this.createActionHandler(this.cli);
     protected readonly autocomplete?: string[];
     protected ref?: Vorpal.Command;
+
+    constructor(protected readonly cli: CommandLineFrontend) {}
 
     attach(app: Vorpal) {
         this.ref = app.command(this.identifier, this.description)
@@ -29,14 +31,13 @@ abstract class Command {
 class SetBrowserCommand extends Command {
     protected readonly identifier: string = 'browser <name>';
     protected readonly description: string;
-    protected readonly action: Vorpal.Action;
     protected readonly autocomplete: string[];
 
     constructor(
-        readonly cli: CommandLineFrontend,
+        protected readonly cli: CommandLineFrontend,
         readonly browserNames: string[]
     ) {
-        super();
+        super(cli);
 
         this.description = [
             `Sets the browser used to login on your behalf to your Twitter account.`,
@@ -44,8 +45,6 @@ class SetBrowserCommand extends Command {
         ].join('\r\n');
 
         this.autocomplete = browserNames;
-
-        this.action = this.createActionHandler(cli);
     }
 
     protected createActionHandler(cli: CommandLineFrontend) {
@@ -59,13 +58,6 @@ class SetBrowserCommand extends Command {
 class LoginCommand extends Command {
     protected readonly identifier: string = 'login';
     protected readonly description: string = 'Login to your Twitter account.';
-    protected readonly action: Vorpal.Action;
-
-    constructor(readonly cli: CommandLineFrontend) {
-        super();
-
-        this.action = this.createActionHandler(cli);
-    }
 
     protected createActionHandler(cli: CommandLineFrontend) {
         return async function(this: Vorpal.CommandInstance) {
@@ -81,6 +73,51 @@ class LoginCommand extends Command {
 
             await cli.logIn(credentials);
         };
+    }
+}
+
+class EndCommand extends Command {
+    protected readonly identifier: string = 'end';
+    protected readonly description: string = 'Ends your session. Bookmarks will stop being fetched, and you will also be logged out.';
+
+    protected createActionHandler(cli: CommandLineFrontend): Vorpal.Action {
+        return async function() {
+            await cli.end();
+        }
+    }
+}
+
+class FetchBookmarksCommand extends Command {
+    protected readonly identifier: string = 'fetch';
+    protected readonly description: string = 'Starts fetching bookmarks.';
+
+    protected createActionHandler(cli: CommandLineFrontend): Vorpal.Action {
+        return async function() {
+            await cli.startFetchingBookmarks();
+        }
+    }
+}
+
+class StopFetchBookmarksCommand extends Command {
+    protected readonly identifier: string = 'stop';
+    protected readonly description: string = 'Stops fetching bookmarks.';
+
+    protected createActionHandler(cli: CommandLineFrontend): Vorpal.Action {
+        return async function() {
+            cli.stopFetchingBookmarks();
+        }
+    }
+}
+
+class DumpBookmarksCommand extends Command {
+    protected readonly identifier: string = 'dump <file>';
+    protected readonly description: string = 'Dump saved bookmarks to a JSON file.';
+
+    protected createActionHandler(cli: CommandLineFrontend): Vorpal.Action {
+        return async function(this: Vorpal.CommandInstance, args: Vorpal.Args) {
+            const filePath = <string> args.file;
+            await cli.dumpBookmarks(filePath);
+        }
     }
 }
 
@@ -132,8 +169,9 @@ export default class CommandLineFrontend {
 
     protected async initCommands() {
         this.globalCommands = [
-            // new QueryBookmarksCommand(),
-            // new DumpBookmarksCommand(),
+            // new QueryBookmarksCommand(this),
+            new DumpBookmarksCommand(this),
+            new EndCommand(this),
         ];
         this.globalCommands.forEach(command => command.attach(this.app));
 
@@ -149,11 +187,11 @@ export default class CommandLineFrontend {
         ];
 
         this.stateCommands[State.LoggedIn] = [
-            // new FetchBookmarksCommand(),
+            new FetchBookmarksCommand(this),
         ];
 
         this.stateCommands[State.FetchingBookmarks] = [
-            // new StopFetchBookmarksCommand(),
+            new StopFetchBookmarksCommand(this),
         ];
     }
 
@@ -175,101 +213,9 @@ export default class CommandLineFrontend {
         this.app.log(message);
     }
 
-//     subscribeToClientEvents(events: Partial<ClientEvents>) {
-//         const eventNames = <ClientEventKey[]> Object.keys(events);
-//         for(const eventName of eventNames) {
-//             const handler = events[eventName]!;
-//             this.client.once(eventName, handler);
-//             this.client.prependOnceListener(eventName, () => {
-//                 this.unsubscribeFromClientEvents(eventNames);
-//             });
-//         }
-//     }
-
-//     protected unsubscribeFromClientEvents(eventNames: ClientEventKey[]) {
-//         for(const eventName of eventNames)
-//             this.client.removeAllListeners(eventName);
-//     }
-
-//     protected async enableSetBrowserCommand() {
-//         const command = 'browser <name>';
-//         const commandDesc = [
-//             `Sets the browser used to login on your behalf to your Twitter account.`,
-//             `Available choices: ${browserNames.join(', ')}.`
-//         ].join('\r\n');
-
-//         this.setBrowserCommand = this.app
-//             .command(command, commandDesc)
-//             .autocomplete(browserNames)
-//             .action(this.onRequestSetBrowser(this));
-//     }
-
-//     protected disableSetBrowserCommand() {
-//         this.setBrowserCommand?.remove();
-//     }
-
-//     protected onRequestSetBrowser(cli: CommandLineFrontend) {
-//         return async function(this: Vorpal.CommandInstance, args: Vorpal.Args) {
-//             const browserName = <string> args.name;
-
-//             const events: Partial<ClientEvents> = {
-//                 success: () => {
-//                     cli.enableLoginCommand();
-//                     cli.enableEndCommand();
-//                     cli.logMessage(this)(`Browser set to ${browserName}. You may now login.`);
-//                 },
-//                 internalError: cli.logMessage(this),
-//                 userError: cli.logMessage(this)
-//             };
-
-//             cli.subscribeToClientEvents(events);
-//             await cli.initClientBrowser(browserName);
-//         }
-//     }
-
     async initClientBrowser(browserName: BrowserName) {
         return this.client.initBrowser(browserName);
     }
-
-//     protected async enableLoginCommand() {
-//         this.disableSetBrowserCommand();
-
-//         this.loginCommand = this.app
-//             .command('login', 'Login to your Twitter account.')
-//             .alias('authenticate')
-//             .action(this.onRequestLogin(this));
-//     }
-
-//     protected disableLoginCommand() {
-//         this.loginCommand?.remove();
-//     }
-
-//     protected onRequestLogin(cli: CommandLineFrontend) {
-//         return async function(this: Vorpal.CommandInstance) {
-//             const events: Partial<ClientEvents> = {
-//                 success: () => {
-//                     cli.disableLoginCommand();
-//                     cli.enableFetchBookmarksCommand();
-//                     cli.logMessage(this)('Successfully logged in!');
-//                 },
-//                 internalError: cli.logMessage(this),
-//                 userError: cli.logMessage(this)
-//             };
-
-//             const credentials = <Credentials> await this.prompt([{
-//                 name: 'username',
-//                 message: 'Username or email: ',
-//                 type: 'input'
-//             }, {
-//                 name: 'password',
-//                 message: 'Password: ',
-//                 type: 'password'
-//             }]);
-
-//             cli.subscribeToClientEvents(events);
-//             await cli.logIn(credentials);
-//         }
-//     }
 
     async logIn(credentials: Credentials) {
         await this.client.logIn(credentials);
@@ -334,8 +280,19 @@ export default class CommandLineFrontend {
 //         }
 //     }
 
-//     async end() {
-//         await this.client.shutDown();
-//     }
-    //
+    async dumpBookmarks(filePath: string) {
+        await this.client.dumpBookmarks(filePath);
+    }
+
+    async startFetchingBookmarks() {
+        await this.client.startFetchingBookmarks();
+    }
+
+    stopFetchingBookmarks() {
+        this.client.stopFetchingBookmarks();
+    }
+
+    async end() {
+        await this.client.end();
+    }
 }
