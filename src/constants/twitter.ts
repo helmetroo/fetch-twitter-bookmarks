@@ -83,7 +83,7 @@ export namespace Twitter {
                 bookmark_timeline: {
                     timeline: {
                         instructions: TimelineInstructions[] // Most likely only contains 1
-                        responseInstructions: {
+                        responseObjects: {
                             feedbackActions: unknown[]
                         }
                     }
