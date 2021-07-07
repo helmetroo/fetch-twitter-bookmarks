@@ -6,10 +6,12 @@ import { BrowserType, chromium, firefox, webkit } from 'playwright';
 import type { Request, Response } from 'playwright';
 import { TypedEmitter } from 'tiny-typed-emitter';
 
-import fetchAvailableBrowsers from '../utils/fetch-available-browsers';
 import { Application } from '../constants/application';
 import { Twitter } from '../constants/twitter';
 import { TwitterRequestError, ConnectionError } from '../constants/error';
+
+import fetchAvailableBrowsers from '../utils/fetch-available-browsers';
+
 import Credentials from './credentials';
 import PageManager from './page-manager';
 import DataExtractor from './data-extractor';
@@ -224,10 +226,19 @@ export default class Client extends TypedEmitter<ClientEvents> {
         await this.pageManager.goToBookmarksPage();
 
         // TODO allow user to retry (by refreshing the page and waiting for the req/res pair again)
+        // TODO allow user to specify cursor or options specifying if they want to use the last cursor or not
         try {
             const config = await this.generateRequesterConfig();
-            await this.persistInitialState(config.startCursor, config.initialBookmarks);
-            this.startRequester(config);
+            const lastSavedCursor = await this.db.getCursorState();
+            if(lastSavedCursor) {
+                config.initialCursor = lastSavedCursor;
+                this.emitNotice(`Retrieving bookmarks from last cursor: ${lastSavedCursor.bottom}`);
+            } else {
+                await this.saveCursorAndBookmarks(config.initialCursor, config.initialBookmarks);
+                this.emitNotice('Saved initial bookmarks and cursor to database.');
+            }
+
+            this.startRequesterProcess(config);
         } catch(err) {
             const errMessage = err.message;
             this.emitInternalError(errMessage);
@@ -236,10 +247,9 @@ export default class Client extends TypedEmitter<ClientEvents> {
         this.state = State.FetchingBookmarks;
     }
 
-    protected async persistInitialState(cursor: Application.Cursor, bookmarks: Application.Tweet[]) {
+    protected async saveCursorAndBookmarks(cursor: Application.Cursor, bookmarks: Application.Tweet[]) {
         await this.db.persistCursorState(cursor);
         await this.db.insertTweets(bookmarks);
-        this.emitNotice('Saved initial bookmarks and cursor to database.');
     }
 
     protected async generateRequesterConfig() {
@@ -259,7 +269,7 @@ export default class Client extends TypedEmitter<ClientEvents> {
     }
 
     protected async buildRequesterConfigFrom(req: Request, res: Response): Promise<BookmarksRequester.ConfigWithBookmarks> {
-        const reqHeader = <Twitter.Api.RequestHeader> (req.headers() as unknown);
+        const reqHeader = <Twitter.Api.PlaywrightHeader> (req.headers() as unknown);
         const reqUrl = new URL(req.url());
 
         const resBody = <Twitter.Api.Response> await res.json();
@@ -270,44 +280,59 @@ export default class Client extends TypedEmitter<ClientEvents> {
         }
 
         const dataExtractor = new DataExtractor(<Twitter.Api.SuccessResponse> resBody);
-        const startCursor = dataExtractor.cursor;
+        const initialCursor = dataExtractor.cursor;
         const initialBookmarks = dataExtractor.tweets;
         return {
             reqUrl,
             reqHeader,
-            startCursor,
+            initialCursor,
             initialBookmarks
         };
     }
 
-    protected startRequester(config: BookmarksRequester.Config) {
-        this.bookmarksRequester = new BookmarksRequester.Requester(config, this.db);
-        this.bookmarksRequester.start();
+    protected startRequesterProcess(config: BookmarksRequester.Config) {
+        this.bookmarksRequester = new BookmarksRequester.Requester(config);
+        this.listenForRequesterEvents(this.bookmarksRequester);
+        this.bookmarksRequester.startRequestLoop();
 
         this.state = State.FetchingBookmarks;
     }
 
-    protected listenForRequesterEvents() {
-        this.bookmarksRequester?.on('fetched', this.notifyRequesterProgress.bind(this));
-        this.bookmarksRequester?.on('error', this.notifyRequesterError.bind(this));
-        this.bookmarksRequester?.on('end', this.notifyRequesterFinished.bind(this));
+    protected listenForRequesterEvents(requester: BookmarksRequester.Requester) {
+        requester.on('fetched', this.handleRequesterProgress.bind(this));
+        requester.on('log', this.handleRequesterLog.bind(this));
+        requester.on('error', this.handleRequesterError.bind(this));
+        requester.on('end', this.handleRequesterFinished.bind(this));
     }
 
-    protected notifyRequesterError(message: string) {
+    protected async handleRequesterProgress(cursor: Application.Cursor, bookmarks: Application.Tweet[]) {
+        await this.saveCursorAndBookmarks(cursor, bookmarks);
+        this.emitNotice(`${bookmarks.length} bookmarks were fetched and saved to the database.`);
+    }
+
+    protected handleRequesterLog(message: string) {
+        // TODO use dedicated logger for this
+        this.emitNotice(message);
+    }
+
+    protected handleRequesterError(requesterErrMessage: string) {
+        const message = `Fetching stopped due to a problem fetching bookmarks. ${requesterErrMessage}`;
         this.emitInternalError(message);
+
+        this.state = State.LoggedIn;
     }
 
-    protected notifyRequesterProgress(bookmarks: Application.Tweet[]) {
-        this.emitNotice(`${bookmarks.length} bookmarks have been fetched and saved to the database.`);
-    }
-
-    protected notifyRequesterFinished() {
+    protected handleRequesterFinished() {
         this.emitNotice('No more bookmarks to fetch, the end may have been reached.');
     }
 
     stopFetchingBookmarks() {
-        this.bookmarksRequester?.stop();
+        this.stopBookmarksRequester();
         this.state = State.LoggedIn;
+    }
+
+    protected stopBookmarksRequester() {
+        this.bookmarksRequester?.stopRequestLoop();
     }
 
     async dumpBookmarks(filePath: string) {
@@ -334,7 +359,7 @@ export default class Client extends TypedEmitter<ClientEvents> {
     }
 
     async end() {
-        this.bookmarksRequester?.stop();
+        this.stopBookmarksRequester();
 
         if(this.loggedIn)
             await this.logOut();

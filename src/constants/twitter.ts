@@ -58,14 +58,18 @@ export namespace Twitter {
 
     export namespace Api {
         export interface RequestHeader {
-            accept: string;
+            accept: '*/*';
+            'accept-encoding': string;
             'accept-language': string;
             authorization: string;
             'cache-control': 'no-cache';
             'content-type': 'application/json';
+            cookie: string;
+            host: 'twitter.com';
             pragma: 'no-cache';
+            referer: 'https://twitter.com/i/bookmarks';
             'sec-ch-ua': string;
-            'sec-ch-ua-mobile': string;
+            'sec-ch-ua-mobile': '?0'; // seems not to vary on desktop
             'sec-fetch-dest': 'empty';
             'sec-fetch-mode': 'cors';
             'sec-fetch-site': 'same-origin';
@@ -73,7 +77,16 @@ export namespace Twitter {
             'x-twitter-active-user': 'yes';
             'x-twitter-auth-type': 'OAuth2Session';
             'x-twitter-client-language': string;
-            cookie: string;
+            'user-agent': string;
+        }
+
+        export interface PlaywrightHeader extends RequestHeader {
+            // Colon headers are set by Playwright
+            // But are not valid when making requests via superagent
+            ':method'?: 'GET';
+            ':authority'?: 'twitter.com';
+            ':scheme'?: 'https';
+            ':path'?: string;
         }
 
         export type Response = SuccessResponse | ErrorResponse;
