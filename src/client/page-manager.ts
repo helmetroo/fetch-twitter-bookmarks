@@ -23,9 +23,17 @@ export default class PageManager {
         this.active = true;
     }
 
+    get currentUrl() {
+        return new URL(this.curPage!.url());
+    }
+
     currentUrlHasPath(path: string) {
-        const currentUrl = new URL(this.curPage!.url());
-        return currentUrl.pathname === path;
+        return this.currentUrl.pathname === path;
+    }
+
+    currentUrlHasQueryParamSet(paramName: string) {
+        const paramValue = this.currentUrl.searchParams.get(paramName);
+        return paramValue === 'true';
     }
 
     waitForRequest(pathnameRegex: RegExp) {
@@ -36,6 +44,16 @@ export default class PageManager {
         return this.curPage!.waitForResponse(pathnameRegex);
     }
 
+    protected async waitUntilDomLoaded() {
+        await this.curPage?.waitForNavigation({
+            waitUntil: 'domcontentloaded'
+        });
+    }
+
+    async goToLogInPage() {
+        await this.curPage?.goto(Twitter.Url.LOGIN);
+    }
+
     async logIn(credentials: Credentials) {
         const {
             usernameInput,
@@ -43,32 +61,23 @@ export default class PageManager {
             submitButton
         } = Twitter.Selectors.LOGIN_PAGE;
 
-        await this.curPage?.goto(Twitter.Url.LOGIN);
         await this.curPage?.type(usernameInput, credentials.username);
         await this.curPage?.type(passwordInput, credentials.password);
         await this.curPage?.click(submitButton);
-        await this.curPage?.waitForNavigation();
+
+        // Twitter redirects to / then /home, so domcontentloaded seems to be the best to wait for
+        await this.waitUntilDomLoaded();
     }
 
-    async enterConfirmationCode(code: string) {
+    async enterAuthorizationCode(code: string) {
         const {
             codeInput,
             submitButton
-        } = Twitter.Selectors.CONFIRMATION_CODE_PAGE;
+        } = Twitter.Selectors.AUTHORIZATION_CODE_PAGE;
 
         await this.curPage?.type(codeInput, code);
         await this.curPage?.click(submitButton);
-    }
-
-    // TODO only keep if these pages are drastically different. If not, should refactor
-    async enterTwoFactorCode(code: string) {
-        const {
-            codeInput,
-            submitButton
-        } = Twitter.Selectors.CONFIRMATION_CODE_PAGE;
-
-        await this.curPage?.type(codeInput, code);
-        await this.curPage?.click(submitButton);
+        await this.waitUntilDomLoaded();
     }
 
     async goToBookmarksPage() {
@@ -80,6 +89,7 @@ export default class PageManager {
     async logOut() {
         await this.curPage?.goto(Twitter.Url.LOGOUT);
         await this.curPage?.click(Twitter.Selectors.LOGOUT_PAGE.confirmButton);
+        await this.waitUntilDomLoaded();
     }
 
     async tearDown() {

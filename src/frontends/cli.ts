@@ -2,7 +2,8 @@ import Vorpal from 'vorpal';
 
 import Client, { State } from '../client/client';
 import type { ErrorType as ClientErrorType, BrowserName } from '../client/client';
-import type Credentials from '../client/credentials';
+import Credentials, { AuthorizationCode } from '../client/credentials';
+import { LoginErrorType, TwitterLoginError } from '../constants/error';
 
 abstract class Command {
     protected abstract readonly identifier: string;
@@ -67,20 +68,100 @@ class LoginCommand extends Command {
     protected readonly description: string = 'Login to your Twitter account.';
     protected readonly aliases: string[] = ['signin', 'authenticate'];
 
-    protected createActionHandler(cli: CommandLineFrontend) {
-        return async function(this: Vorpal.CommandInstance) {
-            const credentials = <Credentials> await this.prompt([{
-                name: 'username',
-                message: 'Username or email: ',
-                type: 'input'
-            }, {
-                name: 'password',
-                message: 'Password: ',
-                type: 'password'
-            }]);
+    protected promptForCredentials(
+        cmd: Vorpal.CommandInstance,
+        usernameMsg = 'Phone, username or email'
+    ): Promise<Credentials> {
+        return <Promise<Credentials>> cmd.prompt([{
+            name: 'username',
+            message: `${usernameMsg}: `,
+            type: 'input'
+        }, {
+            name: 'password',
+            message: 'Password: ',
+            type: 'password'
+        }]);
+    }
 
-            await cli.logIn(credentials);
+    protected promptForAuthCode(cmd: Vorpal.CommandInstance): Promise<AuthorizationCode> {
+        return <Promise<AuthorizationCode>> cmd.prompt([{
+            name: 'authCode',
+            message: 'Code: ',
+            type: 'password'
+        }]);
+    }
+
+    protected createActionHandler(cli: CommandLineFrontend) {
+        const cliCmd = this;
+        return async function(this: Vorpal.CommandInstance) {
+            const credentials =
+                await cliCmd.promptForCredentials(this);
+
+            try {
+                await cli.logIn(credentials);
+            } catch(err) {
+                if(err instanceof TwitterLoginError)
+                    await cliCmd.blockUntilLoginErrorHandled.call(cliCmd, err, this, cli);
+            }
         };
+    }
+
+    protected async blockUntilLoginErrorHandled(
+        err: TwitterLoginError,
+        cmd: Vorpal.CommandInstance,
+        cli: CommandLineFrontend
+    ) {
+        let lastError = err;
+        while(true) {
+            cmd.log(lastError.message);
+
+            try {
+                await this.handleLastLoginError(lastError, cmd, cli);
+                break;
+            } catch(err) {
+                if(err instanceof TwitterLoginError) {
+                    lastError = err;
+                    continue;
+                }
+
+                break;
+            }
+        }
+    }
+
+    protected async handleLastLoginError(
+        lastError: TwitterLoginError,
+        cmd: Vorpal.CommandInstance,
+        cli: CommandLineFrontend
+    ) {
+        const reqsUsernameOrPhoneOnly =
+            (lastError.type === LoginErrorType.RequiresUsernameOrPhoneOnly);
+        if(reqsUsernameOrPhoneOnly)
+            return this.tryWithUsernameOrPhoneOnly(cmd, cli);
+
+        const reqsAuthCode =
+            (lastError.type === LoginErrorType.Requires2FACode) ||
+            (lastError.type === LoginErrorType.RequiresAuthCode);
+        if(reqsAuthCode)
+            return this.tryWithAuthCode(cmd, cli);
+
+        return this.tryWithCredentials(cmd, cli);
+    }
+
+    protected async tryWithCredentials(cmd: Vorpal.CommandInstance, cli: CommandLineFrontend) {
+        const credentials = await this.promptForCredentials(cmd);
+        await cli.logIn(credentials);
+    }
+
+    protected async tryWithUsernameOrPhoneOnly(cmd: Vorpal.CommandInstance, cli: CommandLineFrontend) {
+        const phoneUsernameCreds =
+            await this.promptForCredentials(cmd, 'Phone or username');
+        await cli.logIn(phoneUsernameCreds);
+    }
+
+    protected async tryWithAuthCode(cmd: Vorpal.CommandInstance, cli: CommandLineFrontend) {
+        const authCode = await this.promptForAuthCode(cmd);
+        await cli.enterAuthorizationCode(authCode);
     }
 }
 
@@ -233,6 +314,10 @@ export default class CommandLineFrontend {
 
     async logIn(credentials: Credentials) {
         await this.client.logIn(credentials);
+    }
+
+    async enterAuthorizationCode(authCode: AuthorizationCode) {
+        await this.client.enterAuthorizationCode(authCode);
     }
 
     async dumpBookmarks(filePath: string) {

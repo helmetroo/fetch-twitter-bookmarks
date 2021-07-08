@@ -12,6 +12,8 @@ import {
     Optional
 } from 'sequelize';
 
+import uniqBy from 'lodash.uniqby';
+
 import rootPathTo from '../utils/root-path-to';
 import { Application } from '../constants/application';
 import { Twitter } from '../constants/twitter';
@@ -364,7 +366,8 @@ export namespace TweetsDB {
                 },
 
                 url: {
-                    type: DataTypes.STRING(100)
+                    type: DataTypes.STRING(100),
+                    allowNull: true
                 },
 
                 verified: {
@@ -433,7 +436,8 @@ export namespace TweetsDB {
                 },
 
                 extended_entities: {
-                    type: DataTypes.JSON
+                    type: DataTypes.JSON,
+                    allowNull: true
                 },
 
                 favorite_count: {
@@ -457,11 +461,13 @@ export namespace TweetsDB {
                 },
 
                 possibly_sensitive: {
-                    type: DataTypes.BOOLEAN
+                    type: DataTypes.BOOLEAN,
+                    allowNull: true
                 },
 
                 possibly_sensitive_editable: {
-                    type: DataTypes.BOOLEAN
+                    type: DataTypes.BOOLEAN,
+                    allowNull: true
                 },
 
                 reply_count: {
@@ -531,7 +537,7 @@ export namespace TweetsDB {
             return this.db.sync();
         }
 
-        static separateTweetsAndAuthors(tweets: Application.Tweet[]): Application.TweetsAndAuthors {
+        static separateIntoUniqueTweetsAndAuthors(tweets: Application.Tweet[]): Application.TweetsAndAuthors {
             const tweetsAndAuthors: Application.TweetsAndAuthors = {
                 tweets: [],
                 authors: []
@@ -542,26 +548,34 @@ export namespace TweetsDB {
                 tweetsAndAuthors.authors.push(tweet.author);
             });
 
+            tweetsAndAuthors.tweets =
+                uniqBy(tweetsAndAuthors.tweets, 'id_str');
+
+            tweetsAndAuthors.authors =
+                uniqBy(tweetsAndAuthors.authors, 'id_str');
+
             return tweetsAndAuthors;
         }
 
         async insertTweets(tweets: Application.Tweet[]) {
             const insertTxn = await this.db.transaction();
             const {
-                authors
-            } = Database.separateTweetsAndAuthors(tweets);
+                tweets: uniqTweets,
+                authors: uniqAuthors
+            } = Database.separateIntoUniqueTweetsAndAuthors(tweets);
 
             // TODO if new data for a tweet/author is null, should it be erased?
             // Who decides this?
             try {
                 await Promise.all([
-                    Author.bulkCreate(authors),
-                    Tweet.bulkCreate(tweets)
+                    Author.bulkCreate(uniqAuthors),
+                    Tweet.bulkCreate(uniqTweets)
                 ]);
 
                 await insertTxn.commit();
             } catch(err) {
                 await insertTxn.rollback();
+                throw err;
             }
         }
 
@@ -573,13 +587,17 @@ export namespace TweetsDB {
         async persistCursorState(cursor: Application.Cursor) {
             const upsertTxn = await this.db.transaction();
 
-            await CursorState.upsert(cursor);
-
             try {
+                await CursorState.upsert(cursor);
                 await upsertTxn.commit();
             } catch(err) {
                 await upsertTxn.rollback();
+                throw err;
             }
+        }
+
+        async getAllAuthors() {
+            return Author.findAll();
         }
 
         async getAllTweets() {

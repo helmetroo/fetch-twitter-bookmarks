@@ -19,6 +19,7 @@
     ],
     "dependencies": {
         "app-root-path": "^3.0.0",
+        "lodash.uniqby": "^4.7.0",
         "playwright": "^1.11.1",
         "sequelize": "^6.6.2",
         "sqlite3": "^5.0.2",
@@ -32,6 +33,7 @@
         "@types/app-root-path": "^1.2.4",
         "@types/faker": "^5.5.6",
         "@types/jest": "^24.0.15",
+        "@types/lodash.uniqby": "^4.7.6",
         "@types/node": "^14",
         "@types/superagent": "^4.1.11",
         "@types/vorpal": "^1.12.0",

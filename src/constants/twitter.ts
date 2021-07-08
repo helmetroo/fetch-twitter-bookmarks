@@ -46,7 +46,7 @@ export namespace Twitter {
             submitButton: 'div[data-testid="LoginForm_Login_Button"]'
         };
 
-        export const CONFIRMATION_CODE_PAGE = {
+        export const AUTHORIZATION_CODE_PAGE = {
             codeInput: 'input[name="challenge_response"]',
             submitButton: 'input[type="submit"]'
         };
@@ -216,8 +216,8 @@ export namespace Twitter {
             full_text: string;
             is_quote_status: boolean;
             lang: string;
-            possibly_sensitive: boolean;
-            possibly_sensitive_editable: boolean;
+            possibly_sensitive?: boolean;
+            possibly_sensitive_editable?: boolean;
             reply_count: number;
             retweet_count: number;
             retweeted: boolean;
@@ -282,7 +282,7 @@ export namespace Twitter {
             screen_name: string;
             statuses_count: number;
             translator_type: 'none' | 'regular' | string;
-            url: string;
+            url?: string;
             verified: boolean;
             want_retweets: boolean;
             withheld_in_countries: unknown[];

@@ -3,6 +3,10 @@ export default interface Credentials {
     password: string;
 }
 
+export interface AuthorizationCode {
+    value: string;
+}
+
 export const INVALID_CREDENTIALS: Credentials = {
     username: ' ',
     password: ' '

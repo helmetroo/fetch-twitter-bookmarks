@@ -8,15 +8,16 @@ import { TypedEmitter } from 'tiny-typed-emitter';
 
 import { Application } from '../constants/application';
 import { Twitter } from '../constants/twitter';
-import { TwitterRequestError, ConnectionError } from '../constants/error';
+import { TwitterRequestError, ConnectionError, TwitterLoginError, LoginErrorType } from '../constants/error';
 
 import fetchAvailableBrowsers from '../utils/fetch-available-browsers';
 
-import Credentials from './credentials';
+import Credentials, { AuthorizationCode } from './credentials';
 import PageManager from './page-manager';
 import DataExtractor from './data-extractor';
 import { TweetsDB } from './tweets-db';
 import { BookmarksRequester } from './bookmarks-requester';
+import { ValidationError } from 'sequelize';
 
 export type BrowserName = 'chromium' | 'firefox' | 'webkit';
 type NameToBrowserType = {
@@ -43,7 +44,6 @@ export enum ErrorType {
 
 export interface ClientEvents {
     notice: (message: string) => void;
-    actionRequired: (reason: string) => void;
     error: (type: ErrorType, message: string, ...rest: string[]) => void;
     transition: (oldState: State, newState: State) => void;
 }
@@ -61,8 +61,6 @@ export default class Client extends TypedEmitter<ClientEvents> {
 
     protected currentState: State = State.NotReady;
     protected loggedIn: boolean = false;
-    protected lastAuthAttemptFailed: boolean = false;
-    protected lastCodeAttemptFailed: boolean = false;
 
     get ready() {
         return this.state !== State.NotReady;
@@ -114,10 +112,6 @@ export default class Client extends TypedEmitter<ClientEvents> {
         this.emit('error', ErrorType.Internal, message);
     }
 
-    protected emitActionRequired(reason: string) {
-        this.emit('actionRequired', reason);
-    }
-
     protected assertPageManagerReady() {
         if(!this.ready) {
             const errorMessage = [
@@ -126,7 +120,10 @@ export default class Client extends TypedEmitter<ClientEvents> {
             ].join('');
 
             this.emitInternalError(errorMessage);
+            return false;
         }
+
+        return true;
     }
 
     async determineAvailableBrowsers() {
@@ -161,15 +158,92 @@ export default class Client extends TypedEmitter<ClientEvents> {
     }
 
     async logIn(credentials: Credentials) {
-        if(!this.ready) {
-            this.emitInternalError(`The browser hasn't been initialized yet.`);
+        if(!this.assertPageManagerReady())
+            return;
+
+        try {
+            const {
+                logIn,
+                logInError
+            } = Twitter.Url.PATHNAMES;
+
+            const atLoginPage =
+                this.pageManager.currentUrlHasPath(logIn) ||
+                this.pageManager.currentUrlHasPath(logInError);
+            if(!atLoginPage)
+                await this.pageManager.goToLogInPage();
+
+            await this.pageManager.logIn(credentials);
+        } catch(err) {
+            const timeoutErrMsg = [
+                'The browser took too long to log you in.',
+                'There may be a connection issue, server problem with Twitter, or other login problem not handled by this app.',
+                'Please try again.'
+            ].join('\r\n');
+            this.emitInternalError(timeoutErrMsg);
             return;
         }
 
-        this.lastAuthAttemptFailed = false;
-        await this.pageManager.logIn(credentials);
-        if(!this.pageManager.currentUrlHasPath(Twitter.Url.PATHNAMES.home))
-            return this.handleLoginIssue();
+        const notAtHomePage =
+            !this.pageManager.currentUrlHasPath(Twitter.Url.PATHNAMES.home);
+        if(notAtHomePage)
+            return this.throwLoginError();
+
+        this.markLoggedIn();
+    }
+
+    protected throwLoginError() {
+        const {
+            logIn,
+            challengeCode,
+            twoFaCode,
+        } = Twitter.Url.PATHNAMES;
+
+        const requiresUsernameOrPhoneOnly =
+            this.pageManager.currentUrlHasPath(logIn) &&
+            this.pageManager.currentUrlHasQueryParamSet('email_disabled');
+
+        if(requiresUsernameOrPhoneOnly) {
+            throw new TwitterLoginError(
+                LoginErrorType.RequiresUsernameOrPhoneOnly,
+                'Due to a high number of login attempts, Twitter would like you to signin with your username/phone.'
+            );
+        }
+
+        const requiresChallengeCode = this.pageManager.currentUrlHasPath(challengeCode);
+        const requires2FACode = this.pageManager.currentUrlHasPath(twoFaCode);
+        const requiresAuthCode = requires2FACode || requiresChallengeCode;
+        if(requiresAuthCode) {
+            const errMessage = (requiresChallengeCode)
+                ? 'Your confirmation code is necessary to proceed.'
+                : 'Your 2FA code is necessary to proceed.';
+
+            throw new TwitterLoginError(
+                LoginErrorType.RequiresAuthCode,
+                errMessage
+            );
+        }
+
+        throw new TwitterLoginError(
+            LoginErrorType.IncorrectCredentials,
+            'Your credentials were incorrect.'
+        );
+    }
+
+    async enterAuthorizationCode(authCode: AuthorizationCode) {
+        if(!this.assertPageManagerReady())
+            return;
+
+        await this.pageManager.enterAuthorizationCode(authCode.value);
+
+        const notAtHomePage =
+            !this.pageManager.currentUrlHasPath(Twitter.Url.PATHNAMES.home);
+        if(notAtHomePage) {
+            throw new TwitterLoginError(
+                LoginErrorType.IncorrectAuthCode,
+                'The code you entered was incorrect or expired.'
+            );
+        }
 
         this.markLoggedIn();
     }
@@ -178,48 +252,6 @@ export default class Client extends TypedEmitter<ClientEvents> {
         this.state = State.LoggedIn;
         this.loggedIn = true;
         this.emitNotice('Successfully logged in.');
-    }
-
-    protected async handleLoginIssue() {
-        const {
-            challengeCode,
-            twoFaCode,
-        } = Twitter.Url.PATHNAMES;
-
-        if(this.pageManager.currentUrlHasPath(challengeCode)) {
-            this.emitActionRequired('Your confirmation code is necessary to proceed.');
-        } else if(this.pageManager.currentUrlHasPath(twoFaCode)) {
-            this.emitActionRequired('Your 2FA code is necessary to proceed. Please check your device.');
-        } else {
-            this.lastAuthAttemptFailed = true;
-            this.emitUserError('Your credentials were incorrect.');
-        }
-    }
-
-    async enterConfirmationCode(code: string) {
-        this.assertPageManagerReady();
-
-        this.lastCodeAttemptFailed = false;
-        await this.pageManager.enterConfirmationCode(code);
-        if(this.pageManager.currentUrlHasPath(Twitter.Url.PATHNAMES.challengeCode)) {
-            this.lastCodeAttemptFailed = true;
-            this.emitUserError('Your challenge code was incorrect.');
-        }
-
-        this.markLoggedIn();
-    }
-
-    async enterTwoFactorCode(code: string) {
-        this.assertPageManagerReady();
-
-        this.lastCodeAttemptFailed = false;
-        await this.pageManager.enterTwoFactorCode(code);
-        if(this.pageManager.currentUrlHasPath(Twitter.Url.PATHNAMES.twoFaCode)) {
-            this.lastCodeAttemptFailed = true;
-            this.emitUserError('Your 2FA code was incorrect.');
-        }
-
-        this.markLoggedIn();
     }
 
     async startFetchingBookmarks() {
@@ -249,7 +281,16 @@ export default class Client extends TypedEmitter<ClientEvents> {
 
     protected async saveCursorAndBookmarks(cursor: Application.Cursor, bookmarks: Application.Tweet[]) {
         await this.db.persistCursorState(cursor);
-        await this.db.insertTweets(bookmarks);
+        try {
+            await this.db.insertTweets(bookmarks);
+        } catch(err) {
+            if(err instanceof ValidationError) {
+                this.emitInternalError(`Validation error trying to save tweets & authors: ${JSON.stringify(err.errors)}`);
+                return;
+            }
+
+            this.emitInternalError(`Save error encountered: ${err.message}`);
+        }
     }
 
     protected async generateRequesterConfig() {
@@ -337,9 +378,18 @@ export default class Client extends TypedEmitter<ClientEvents> {
 
     async dumpBookmarks(filePath: string) {
         // TODO if there are a lot to write, do we need to chunkify writing somehow?
+        // TODO if file already exists, should prompt user if they want to overwrite it
+        const authors = await this.db.getAllAuthors();
+        const authorObjs = authors.map(author => author.toJSON());
+
         const bookmarks = await this.db.getAllTweets();
         const bookmarkObjs = bookmarks.map(bookmark => bookmark.toJSON());
-        const serializedBookmarks = JSON.stringify({ bookmarks: bookmarkObjs });
+
+        const serializedBookmarks = JSON.stringify({
+            authors: authorObjs,
+            bookmarks: bookmarkObjs
+        });
+
         await writeFile(filePath, serializedBookmarks, 'utf8');
         this.emitNotice(`${bookmarks.length} bookmarks have been successfully dumped to ${filePath}.`)
     }
@@ -366,5 +416,7 @@ export default class Client extends TypedEmitter<ClientEvents> {
 
         await this.pageManager.tearDown();
         this.state = State.NotReady;
+
+        this.emitNotice('Your session has ended. You can now select a different browser to use or exit.')
     }
 }

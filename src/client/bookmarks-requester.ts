@@ -107,19 +107,11 @@ export namespace BookmarksRequester {
             // TODO user-agent header includes "headless" (may want to remove?)
             let res: superagent.Response;
             try {
-                res = await superagent.get(reqUrlStr)
-                    .set(this.header)
-                    .buffer(true)
-                    .parse(({text}) => {
-                        try {
-                            this.log('Response raw body: ${text}');
-                            return JSON.parse(<string> text);
-                        } catch(err) {
-                            this.emit('error', 'There was a problem parsing JSON');
-                            return {};
-                        }
-                    })
+                res = await superagent
+                    .get(reqUrlStr)
+                    .set(this.header);
             } catch(err) {
+                this.emit('error', err.message);
                 throw new ConnectionError(err.message);
             }
 
@@ -130,7 +122,7 @@ export namespace BookmarksRequester {
                 throw new TwitterRequestError(errorMessage);
             }
 
-            return <Twitter.Api.SuccessResponse> (res as unknown);
+            return <Twitter.Api.SuccessResponse> resBody;
         }
 
         protected static toSuperagentHeader(header: Twitter.Api.RequestHeader): Twitter.Api.RequestHeader {
