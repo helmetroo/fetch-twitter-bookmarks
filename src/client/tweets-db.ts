@@ -224,7 +224,8 @@ export namespace TweetsDB {
 
                 id_str: {
                     type: DataTypes.STRING(20),
-                    primaryKey: true
+                    primaryKey: true,
+                    unique: true
                 },
 
                 created_date: {
@@ -407,7 +408,8 @@ export namespace TweetsDB {
 
                 id_str: {
                     type: DataTypes.STRING(20),
-                    primaryKey: true
+                    primaryKey: true,
+                    unique: true
                 },
 
                 author_id_str: {
@@ -523,14 +525,11 @@ export namespace TweetsDB {
 
         protected defineAssociations() {
             Author.hasMany(Tweet, {
-                sourceKey: 'id_str',
                 foreignKey: 'author_id_str',
                 'as': 'tweets'
             });
 
-            Tweet.belongsTo(Author, {
-                foreignKey: 'id_str'
-            });
+            Tweet.belongsTo(Author);
         }
 
         init() {
