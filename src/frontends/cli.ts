@@ -140,7 +140,6 @@ class LoginCommand extends Command {
             return this.tryWithUsernameOrPhoneOnly(cmd, cli);
 
         const reqsAuthCode =
-            (lastError.type === LoginErrorType.Requires2FACode) ||
             (lastError.type === LoginErrorType.RequiresAuthCode);
         if(reqsAuthCode)
             return this.tryWithAuthCode(cmd, cli);
