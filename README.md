@@ -25,7 +25,7 @@
 # How it works
 At the moment, Twitter offers no means through their current developer API enabling you to fetch your bookmarks, but there is a means to do so through an API endpoint the bookmarks page references (see below). I'm aware [their team is working on it](https://twittercommunity.com/t/twitter-bookmarks-not-accessible-via-the-api/142160), though.
 
-1. To be able to leverage this API endpoint, you will need to login to Twitter's site, which this application will do on your behalf to Twitter's site through a headless browser, powered by [playwright](https://playwright.dev/). If Twitter prompts you for a code to log in (either because you have 2FA turned on or because they suspect a "suspicious" login), you'll then be prompted for your authentication code. 
+1. To be able to leverage this API endpoint, you will need to login to Twitter's site, which this application will do on your behalf through a headless browser, handled by [playwright](https://playwright.dev/). If Twitter prompts you for a code to log in (either because you have 2FA turned on or because they suspect a "suspicious" login), you'll then be prompted for your authentication code. 
 
 2. When you wish to start fetching bookmarks, the browser navigates to the bookmarks page, and watches for a network request to a specific API endpoint matching this pattern:
 
@@ -37,13 +37,13 @@ For fetching bookmarks, `$OPERATION_NAME` will be `'Bookmarks'`. Both `$QUERY_ID
 {queryId:"$QUERY_ID",operationName:"Bookmarks",operationType:"query"}
 ```
 
-The query parameter `variables` is url-encoded JSON, and represents the query parameters. For convenience, and to doubly make sure the tool presents like a browser to Twitter, the same parameters the bookmarks page already passes to the query are used, including request headers.
+The query parameter `variables` is url-encoded JSON, and represents the query parameters. For convenience, and to doubly make sure the tool presents like a browser to Twitter, the same parameters the bookmarks page already passes to the query are used, including request headers. There will be an option later to allow you to override a selection of these query parameters.
 
 There are certain request headers the API seems to expect (i.e. an authorization token), which is the sole reason why the step of logging you in with a browser is necessary for the app to fetch data from this endpoint.
 
 A successful response returns the most recent bookmarks (the same ones you see when you first load the bookmarks page. Also present in the response is a cursor (string), which is necessary to fetch the next set of bookmarks. The most recent bookmarks from that initial response will be saved if the application doesn't have a cursor to fetch the next set of bookmarks from (which will most likely be the case if you're running it for the first time). This cursor enables the application to resume fetching bookmarks from the last successful point in case of an error, or if you decide to stop.
 
-3. Using said response, [superagent](https://visionmedia.github.io/superagent/) then makes subsequent requests to the API URL, and fetches as many bookmarks as possible. Upon each successful response, the bookmarks and the next cursor are saved to the database. 
+3. Using said response, [superagent](https://visionmedia.github.io/superagent/) then makes subsequent requests to the API URL, and fetches as many bookmarks as possible. An intentional delay of 300ms is added in between these subsequent responses to pretend like a human is scrolling through the bookmarks page; an option to change/remove that delay will be added later. Upon each successful response, the bookmarks and the next cursor are saved to the database. 
 
 There will be a option later to let you set the cursor yourself, or begin fetching bookmarks from the top.
 
@@ -101,11 +101,11 @@ npm start
 ```
 
 1. When you first run the app, you'll see a list of browsers you can run. Run the command `browser $BROWSER` (alias `set-browser`).`$BROWSER` can be any one of the available browser choices runnable on your machine, which you can see with `help`.
-2. After you've set the browser, you can now `login` (alias `authenticate`). You'll be prompted for your credentials. If login was successful, you'll see a success message and can start fetching bookmarks. However, you may be prompted to login with your username/phone only, or an additional authorization code (2FA or other identification code Twitter may ask you for to make sure it's you).
+2. After you've set the browser, you can now `login` (alias `authenticate`). You'll be prompted for your credentials. If login was successful, you'll see a success message and can start fetching bookmarks. However, you may be prompted to login with your username/phone only, or be asked to provide a specific authorization code (2FA or other identification code Twitter may ask you for to make sure it's you).
 3. You can start fetching bookmarks with `fetch`. The browser will navigate to the bookmarks page, watch for a call to the bookmarks API (see [how it works](#how-it-works) for more info on this), then repeatedly make calls to this API until no more bookmarks can be fetched (either because there are no more to fetch, or an error was encountered). You can stop fetching at any time with the `stop` command.
 4. When you're finished, you can either end your session with `end` (alias `close`), if you want to choose a different browser, or you can `exit` the application entirely. Both commands will log you out first if you had already signed in.
 
-At any time, you can dump bookmarks saved in the database to a JSON file with the `dump $FILE` command. `$FILE` can be absolute or relative. Relative paths are resolved relative to your current working directory (more succinctly, the path works like [this](https://nodejs.org/docs/latest-v14.x/api/fs.html#fs_file_paths)). 
+At any time, you can dump bookmarks saved in the database to a JSON file with the `dump $FILE` command. `$FILE` can be absolute or relative. Relative paths are resolved relative to your current working directory (more succinctly, the path works like [this](https://nodejs.org/docs/latest-v14.x/api/fs.html#fs_file_paths)). More formats will be supported later.
 
 <a name="database"></a>
 ## Database
