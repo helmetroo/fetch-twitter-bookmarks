@@ -17,6 +17,7 @@ import uniqBy from 'lodash.uniqby';
 import rootPathTo from '../utils/root-path-to';
 import { Application } from '../constants/application';
 import { Twitter } from '../constants/twitter';
+import { DatabaseError } from '../constants/error';
 
 export namespace TweetsDB {
     interface SequelizeTimestamped {
@@ -49,7 +50,7 @@ export namespace TweetsDB {
 
     // Really not a fan of redeclaring attributes in these class declarations...
     // is there another way?
-    class Tweet extends Model<TweetSchema, TweetCreationSchema> implements TweetSchema {
+    export class Tweet extends Model<TweetSchema, TweetCreationSchema> implements TweetSchema {
         id_str!: string;
         created_date!: Date;
         author_id_str!: string;
@@ -88,7 +89,7 @@ export namespace TweetsDB {
         }
     }
 
-    class Author extends Model<AuthorSchema, AuthorCreationSchema> implements AuthorSchema {
+    export class Author extends Model<AuthorSchema, AuthorCreationSchema> implements AuthorSchema {
         id_str!: string;
         created_date!: Date;
         blocked_by!: boolean;
@@ -154,7 +155,7 @@ export namespace TweetsDB {
         }
     }
 
-    class CursorState extends Model<CursorSchema, CursorCreationSchema> implements CursorSchema {
+    export class CursorState extends Model<CursorSchema, CursorCreationSchema> implements CursorSchema {
         top!: string;
         bottom!: string;
 
@@ -533,7 +534,12 @@ export namespace TweetsDB {
         }
 
         init() {
-            return this.db.sync();
+            try {
+                return this.db.sync();
+            } catch(err) {
+                const userMsg = 'The database failed to initialize.';
+                throw new DatabaseError(err, userMsg);
+            }
         }
 
         static separateIntoUniqueTweetsAndAuthors(tweets: Application.Tweet[]): Application.TweetsAndAuthors {
@@ -574,13 +580,20 @@ export namespace TweetsDB {
                 await insertTxn.commit();
             } catch(err) {
                 await insertTxn.rollback();
-                throw err;
+
+                const userMsg = 'There was a problem saving authors and tweets to the database.';
+                throw new DatabaseError(err, userMsg);
             }
         }
 
         async getCursorState() {
-            // There should only be one
-            return CursorState.findOne();
+            try {
+                // There should only be one
+                return CursorState.findOne();
+            } catch(err) {
+                const userMsg = 'Unable to retrieve the current cursor.';
+                throw new DatabaseError(err, userMsg);
+            }
         }
 
         async persistCursorState(cursor: Application.Cursor) {
@@ -591,7 +604,9 @@ export namespace TweetsDB {
                 await upsertTxn.commit();
             } catch(err) {
                 await upsertTxn.rollback();
-                throw err;
+
+                const userMsg = 'There was a problem saving the cursor to the database.';
+                throw new DatabaseError(err, userMsg);
             }
         }
 
@@ -613,7 +628,12 @@ export namespace TweetsDB {
         }
 
         async close() {
-            return this.db.close();
+            try {
+                return this.db.close();
+            } catch(err) {
+                const userMsg = 'There was an issue closing the connection to the database.';
+                throw new DatabaseError(err, userMsg);
+            }
         }
     }
 }

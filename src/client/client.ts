@@ -5,10 +5,23 @@ import { promisify } from 'util';
 import { BrowserType, chromium, firefox, webkit } from 'playwright';
 import type { Request, Response } from 'playwright';
 import { TypedEmitter } from 'tiny-typed-emitter';
+import { createLogger, format, transports } from 'winston';
+import type { Logger } from 'winston';
 
+import rootPathTo from '../utils/root-path-to';
 import { Application } from '../constants/application';
 import { Twitter } from '../constants/twitter';
-import { TwitterRequestError, ConnectionError, TwitterLoginError, LoginErrorType } from '../constants/error';
+import {
+    ApplicationError,
+    TwitterHttpRequestError,
+    TwitterLoginError,
+    LoginErrorType,
+    PageManagerInitError,
+    PageManagerTimeoutError,
+    DumpFileError,
+    TwitterLogoutError,
+    RequesterError,
+} from '../constants/error';
 
 import fetchAvailableBrowsers from '../utils/fetch-available-browsers';
 
@@ -17,7 +30,6 @@ import PageManager from './page-manager';
 import DataExtractor from './data-extractor';
 import { TweetsDB } from './tweets-db';
 import { BookmarksRequester } from './bookmarks-requester';
-import { ValidationError } from 'sequelize';
 
 export type BrowserName = 'chromium' | 'firefox' | 'webkit';
 type NameToBrowserType = {
@@ -58,6 +70,7 @@ export default class Client extends TypedEmitter<ClientEvents> {
     protected pageManager: PageManager;
     protected db: TweetsDB.Database;
     protected bookmarksRequester?: BookmarksRequester.Requester;
+    protected logger: Logger;
 
     protected currentState: State = State.NotReady;
     protected loggedIn: boolean = false;
@@ -91,25 +104,93 @@ export default class Client extends TypedEmitter<ClientEvents> {
     constructor() {
         super();
 
+        this.availableBrowserNames = [];
+
         // TODO allow frontends to config
         this.db = new TweetsDB.Database({
             inMemory: false,
-            logging: false
+            logging: this.logDebug.bind(this)
         });
         this.pageManager = new PageManager();
-        this.availableBrowserNames = [];
+        this.logger = createLogger({
+            transports: [
+                new transports.File({
+                    level: 'debug',
+                    format: format.combine(
+                        format.timestamp(),
+                        format.prettyPrint(),
+                        format.errors({
+                            stack: true
+                        }),
+                        Client.createFileLogFormatter(),
+                    ),
+                    filename: rootPathTo('/logs/debug.log')
+                })
+            ],
+
+            exceptionHandlers: [
+                new transports.File({
+                    filename: rootPathTo('/logs/exceptions.log')
+                })
+            ]
+        });
+    }
+
+    protected static createFileLogFormatter() {
+        return format.printf((info) => {
+            const logMessage = `${info.timestamp} [${info.level}]: ${info.message}`;
+
+            return info.stack
+                ? `${logMessage}\r\n\t${info.stack}`
+                : logMessage;
+        });
     }
 
     protected emitNotice(message: string) {
         this.emit('notice', message);
     }
 
+    protected logHttpEvent(
+        url: string,
+        method: string,
+        params: URLSearchParams,
+        header: Twitter.Api.RequestHeader
+    ) {
+        const message = [
+            `Making ${method} request to ${url}`,
+            `Params: ${params.toString()}`,
+            `Header: ${JSON.stringify(header)}`
+        ].join('\r\n\t');
+
+        this.logDebug(message);
+    }
+
+    protected logDebug(message: string) {
+        this.logger.log({
+            level: 'debug',
+            message
+        })
+    }
+
     protected emitUserError(message: string) {
         this.emit('error', ErrorType.User, message);
     }
 
-    protected emitInternalError(message: string) {
+    protected emitAndLogInternalError(err: ApplicationError) {
+        this.emitInternalError(err);
+        this.logInternalError(err);
+    }
+
+    protected emitInternalError(err: ApplicationError) {
+        const message = (err.userMessage)
+            ? err.userMessage
+            : `Internal error: ${err.message}`;
+
         this.emit('error', ErrorType.Internal, message);
+    }
+
+    protected logInternalError(err: ApplicationError) {
+        this.logger.error(err);
     }
 
     protected assertPageManagerReady() {
@@ -119,7 +200,8 @@ export default class Client extends TypedEmitter<ClientEvents> {
                 'The page manager is necessary to sign in on your behalf to Twitter and start the process of fetching bookmarks.'
             ].join('');
 
-            this.emitInternalError(errorMessage);
+            const unreadyError = new PageManagerInitError(errorMessage);
+            this.emitAndLogInternalError(unreadyError);
             return false;
         }
 
@@ -148,12 +230,24 @@ export default class Client extends TypedEmitter<ClientEvents> {
     }
 
     async initDb() {
-        await this.db.init();
+        try {
+            await this.db.init();
+        } catch(err) {
+            this.emitAndLogInternalError(err);
+            return;
+        }
+
         this.emitNotice('Bookmarks database ready.');
     }
 
     async closeDb() {
-        await this.db.close();
+        try {
+            await this.db.close();
+        } catch(err) {
+            this.emitAndLogInternalError(err);
+            return;
+        }
+
         this.emitNotice('Closed connection to bookmarks database.');
     }
 
@@ -175,12 +269,14 @@ export default class Client extends TypedEmitter<ClientEvents> {
 
             await this.pageManager.logIn(credentials);
         } catch(err) {
-            const timeoutErrMsg = [
+            const userMsg = [
                 'The browser took too long to log you in.',
                 'There may be a connection issue, server problem with Twitter, or other login problem not handled by this app.',
                 'Please try again.'
             ].join('\r\n');
-            this.emitInternalError(timeoutErrMsg);
+            const timeoutErr = new PageManagerTimeoutError(err, userMsg);
+            this.emitAndLogInternalError(timeoutErr);
+
             return;
         }
 
@@ -251,6 +347,7 @@ export default class Client extends TypedEmitter<ClientEvents> {
     protected markLoggedIn() {
         this.state = State.LoggedIn;
         this.loggedIn = true;
+
         this.emitNotice('Successfully logged in.');
     }
 
@@ -267,13 +364,12 @@ export default class Client extends TypedEmitter<ClientEvents> {
                 this.emitNotice(`Retrieving bookmarks from last cursor: ${lastSavedCursor.bottom}`);
             } else {
                 await this.saveCursorAndBookmarks(config.initialCursor, config.initialBookmarks);
-                this.emitNotice('Saved initial bookmarks and cursor to database.');
+                this.emitNotice(`Saved ${config.initialBookmarks.length} initial bookmarks and cursor to database.`);
             }
 
             this.startRequesterProcess(config);
         } catch(err) {
-            const errMessage = err.message;
-            this.emitInternalError(errMessage);
+            this.emitAndLogInternalError(err);
         }
 
         this.state = State.FetchingBookmarks;
@@ -281,16 +377,7 @@ export default class Client extends TypedEmitter<ClientEvents> {
 
     protected async saveCursorAndBookmarks(cursor: Application.Cursor, bookmarks: Application.Tweet[]) {
         await this.db.persistCursorState(cursor);
-        try {
-            await this.db.insertTweets(bookmarks);
-        } catch(err) {
-            if(err instanceof ValidationError) {
-                this.emitInternalError(`Validation error trying to save tweets & authors: ${JSON.stringify(err.errors)}`);
-                return;
-            }
-
-            this.emitInternalError(`Save error encountered: ${err.message}`);
-        }
+        await this.db.insertTweets(bookmarks);
     }
 
     protected async generateRequesterConfig() {
@@ -303,7 +390,8 @@ export default class Client extends TypedEmitter<ClientEvents> {
                 this.pageManager.waitForResponse(bookmarksPathnameRegex)
             ]);
         } catch(err) {
-            throw new ConnectionError('Could not connect to Twitter to fetch bookmarks. There may be a connection issue.');
+            const userMsg = `It took too long to wait for information about Twitter's bookmark endpoint.`;
+            throw new PageManagerTimeoutError(err, userMsg);
         }
 
         return this.buildRequesterConfigFrom(req, res);
@@ -312,15 +400,14 @@ export default class Client extends TypedEmitter<ClientEvents> {
     protected async buildRequesterConfigFrom(req: Request, res: Response): Promise<BookmarksRequester.ConfigWithBookmarks> {
         const reqHeader = <Twitter.Api.PlaywrightHeader> (req.headers() as unknown);
         const reqUrl = new URL(req.url());
+        this.logHttpEvent(reqUrl.toString(), req.method(), reqUrl.searchParams, reqHeader);
 
-        const resBody = <Twitter.Api.Response> await res.json();
-        const resBodyAsError = <Twitter.Api.ErrorResponse> resBody;
-        if(resBodyAsError.errors) {
-            const twtrErrMessage = resBodyAsError.errors[0].message;
-            throw new TwitterRequestError(`Twitter gave an error attempting to fetch bookmarks. Message given: ${twtrErrMessage}`);
-        }
+        const reqFailed = !res.ok();
+        if(reqFailed)
+            throw TwitterHttpRequestError.fromPlaywright(req, res);
 
-        const dataExtractor = new DataExtractor(<Twitter.Api.SuccessResponse> resBody);
+        const resBody = <Twitter.Api.SuccessResponse> await res.json();
+        const dataExtractor = new DataExtractor(resBody);
         const initialCursor = dataExtractor.cursor;
         const initialBookmarks = dataExtractor.tweets;
         return {
@@ -340,25 +427,34 @@ export default class Client extends TypedEmitter<ClientEvents> {
     }
 
     protected listenForRequesterEvents(requester: BookmarksRequester.Requester) {
+        requester.on('http', this.logHttpEvent.bind(this));
         requester.on('fetched', this.handleRequesterProgress.bind(this));
-        requester.on('log', this.handleRequesterLog.bind(this));
         requester.on('error', this.handleRequesterError.bind(this));
         requester.on('end', this.handleRequesterFinished.bind(this));
     }
 
     protected async handleRequesterProgress(cursor: Application.Cursor, bookmarks: Application.Tweet[]) {
-        await this.saveCursorAndBookmarks(cursor, bookmarks);
+        try {
+            await this.saveCursorAndBookmarks(cursor, bookmarks);
+        } catch(err) {
+            const requesterErr = new RequesterError(err, 'There was an error saving the last fetched bookmarks.');
+            this.emitAndLogInternalError(requesterErr);
+            this.stopFetchingBookmarks();
+
+            return;
+        }
+
         this.emitNotice(`${bookmarks.length} bookmarks were fetched and saved to the database.`);
     }
 
     protected handleRequesterLog(message: string) {
-        // TODO use dedicated logger for this
         this.emitNotice(message);
     }
 
-    protected handleRequesterError(requesterErrMessage: string) {
-        const message = `Fetching stopped due to a problem fetching bookmarks. ${requesterErrMessage}`;
-        this.emitInternalError(message);
+    protected handleRequesterError(err: ApplicationError) {
+        debugger;
+        const requesterErr = new RequesterError(err, 'An error was encountered fetching bookmarks.');
+        this.emitAndLogInternalError(requesterErr);
 
         this.state = State.LoggedIn;
     }
@@ -370,6 +466,8 @@ export default class Client extends TypedEmitter<ClientEvents> {
     stopFetchingBookmarks() {
         this.stopBookmarksRequester();
         this.state = State.LoggedIn;
+
+        this.emitNotice('Bookmark fetching has stopped.');
     }
 
     protected stopBookmarksRequester() {
@@ -377,21 +475,40 @@ export default class Client extends TypedEmitter<ClientEvents> {
     }
 
     async dumpBookmarks(filePath: string) {
+        let authors: TweetsDB.Author[] = [];
+        let bookmarks: TweetsDB.Tweet[] = [];
+
+        let authorObjs: object[] = [];
+        let bookmarkObjs: object[] = [];
+        try {
+            authors = await this.db.getAllAuthors();
+            authorObjs = authors.map(author => author.toJSON());
+
+            bookmarks = await this.db.getAllTweets();
+            bookmarkObjs = bookmarks.map(bookmark => bookmark.toJSON());
+        } catch(err) {
+            this.emitAndLogInternalError(err);
+            return;
+        }
+
         // TODO if there are a lot to write, do we need to chunkify writing somehow?
         // TODO if file already exists, should prompt user if they want to overwrite it
-        const authors = await this.db.getAllAuthors();
-        const authorObjs = authors.map(author => author.toJSON());
+        try {
+            const serializedBookmarks = JSON.stringify({
+                authors: authorObjs,
+                bookmarks: bookmarkObjs
+            });
 
-        const bookmarks = await this.db.getAllTweets();
-        const bookmarkObjs = bookmarks.map(bookmark => bookmark.toJSON());
-
-        const serializedBookmarks = JSON.stringify({
-            authors: authorObjs,
-            bookmarks: bookmarkObjs
-        });
-
-        await writeFile(filePath, serializedBookmarks, 'utf8');
-        this.emitNotice(`${bookmarks.length} bookmarks have been successfully dumped to ${filePath}.`)
+            await writeFile(filePath, serializedBookmarks, 'utf8');
+            this.emitNotice(`${bookmarks.length} bookmarks have been successfully dumped to ${filePath}.`)
+        } catch(err) {
+            const dumpErrorMsg = [
+                `Unable to save bookmarks at ${filePath}.`,
+                `The disk may be full/not responding or you have insufficient permissions.`
+            ].join('\r\n');
+            const dumpErr = new DumpFileError(err, dumpErrorMsg);
+            this.emitAndLogInternalError(dumpErr);
+        }
     }
 
     async logOut() {
@@ -405,7 +522,9 @@ export default class Client extends TypedEmitter<ClientEvents> {
             return;
         }
 
-        this.emitInternalError('Although a logout attempt was made, you may not have been properly logged out.');
+        const logoutErrMsg = 'Although a logout attempt was made, you may not have been properly logged out.';
+        const logoutError = new TwitterLogoutError(logoutErrMsg);
+        this.emitAndLogInternalError(logoutError);
     }
 
     async end() {

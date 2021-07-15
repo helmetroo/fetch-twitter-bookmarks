@@ -1,9 +1,9 @@
 import Vorpal from 'vorpal';
 
+import { LoginErrorType, TwitterLoginError } from '../constants/error';
 import Client, { State } from '../client/client';
 import type { ErrorType as ClientErrorType, BrowserName } from '../client/client';
 import Credentials, { AuthorizationCode } from '../client/credentials';
-import { LoginErrorType, TwitterLoginError } from '../constants/error';
 
 abstract class Command {
     protected abstract readonly identifier: string;
@@ -214,7 +214,7 @@ type StateCommands = {
 };
 
 export default class CommandLineFrontend {
-    protected app: Vorpal;
+    protected shell: Vorpal;
     protected client: Client;
 
     protected globalCommands: Command[] = [];
@@ -227,7 +227,7 @@ export default class CommandLineFrontend {
     };
 
     constructor() {
-        this.app = new Vorpal();
+        this.shell = new Vorpal();
         this.client = new Client();
     }
 
@@ -241,14 +241,17 @@ export default class CommandLineFrontend {
 
     async init() {
         this.assertIsTTY();
-
-        this.app = this.app
-            .delimiter('fetch-twitter-bookmarks >')
-            .show();
-
+        this.show();
         this.subscribeToClientEvents();
         await this.initClientDb();
         await this.initCommands();
+    }
+
+
+    protected show() {
+        this.shell = this.shell
+            .delimiter('fetch-twitter-bookmarks >')
+            .show();
     }
 
     protected async initClientDb() {
@@ -260,14 +263,14 @@ export default class CommandLineFrontend {
             // new QueryBookmarksCommand(this),
             new DumpBookmarksCommand(this),
         ];
-        this.globalCommands.forEach(command => command.attach(this.app));
+        this.globalCommands.forEach(command => command.attach(this.shell));
 
         const browserNames = await this.client.determineAvailableBrowsers();
         this.stateCommands[State.NotReady] = [
             new SetBrowserCommand(this, browserNames)
         ];
         this.stateCommands[State.NotReady]
-            .forEach(command => command.attach(this.app));
+            .forEach(command => command.attach(this.shell));
 
         this.stateCommands[State.LoggedOut] = [
             new LoginCommand(this),
@@ -296,15 +299,16 @@ export default class CommandLineFrontend {
         oldCommands.forEach(command => command.detach());
 
         const newCommands = this.stateCommands[newState];
-        newCommands.forEach(command => command.attach(this.app));
+        newCommands.forEach(command => command.attach(this.shell));
     }
 
     protected onClientError(type: ClientErrorType, message: string) {
-        this.app.log(message);
+        // TODO color errors
+        this.shell.log(message);
     }
 
     protected onClientNotice(message: string) {
-        this.app.log(message);
+        this.shell.log(message);
     }
 
     async initClientBrowser(browserName: BrowserName) {

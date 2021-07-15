@@ -1,11 +1,11 @@
-import type { URL } from 'url';
+import type { URL, URLSearchParams } from 'url';
 import superagent from 'superagent';
 import { TypedEmitter } from 'tiny-typed-emitter';
 
 import { Twitter } from '../constants/twitter';
 import { Application } from '../constants/application';
 import DataExtractor from './data-extractor';
-import { ConnectionError, TwitterRequestError } from '../constants/error';
+import { ApplicationError, TwitterHttpRequestError } from '../constants/error';
 
 export namespace BookmarksRequester {
     export interface Config {
@@ -19,9 +19,9 @@ export namespace BookmarksRequester {
     }
 
     export interface RequesterEvents {
+        http: (url: string, method: string, params: URLSearchParams, header: Twitter.Api.RequestHeader) => void;
         fetched: (cursor: Application.Cursor, bookmarks: Application.Tweet[]) => void;
-        log: (message: string) => void;
-        error: (message: string) => void;
+        error: (error: ApplicationError) => void;
         end: () => void;
     }
 
@@ -81,11 +81,7 @@ export namespace BookmarksRequester {
                 if(this.reachedEnd)
                     this.emit('end');
             } catch(err) {
-                if(err instanceof TwitterRequestError) {
-                    this.emit('error', `Reason given by Twitter: ${err.message}`);
-                } else {
-                    this.emit('error', `There may be a connection issue. Error thrown: ${err.message}`);
-                }
+                this.emit('error', err);
 
                 this.halted = true;
             } finally {
@@ -102,27 +98,27 @@ export namespace BookmarksRequester {
             reqParams.set('variables', JSON.stringify(reqSearchVars));
 
             const reqUrlStr = this.url.toString();
-            this.logRequest(reqUrlStr, this.header);
 
             // TODO user-agent header includes "headless" (may want to remove?)
+            const req = superagent
+                .get(reqUrlStr)
+                .set(this.header);
+
+            this.emitHttp(reqUrlStr, req.method, reqParams, this.header);
+
             let res: superagent.Response;
             try {
-                res = await superagent
-                    .get(reqUrlStr)
-                    .set(this.header);
+                res = await req;
             } catch(err) {
-                this.emit('error', err.message);
-                throw new ConnectionError(err.message);
+                const reqWithHeaders = {
+                    ...req,
+                    headers: this.header
+                };
+
+                throw TwitterHttpRequestError.fromSuperagent(err, reqWithHeaders);
             }
 
-            const resBody = <Twitter.Api.Response> res.body;
-            const resBodyAsError = <Twitter.Api.ErrorResponse> resBody;
-            if(resBodyAsError.errors) {
-                const errorMessage = resBodyAsError.errors[0]!.message;
-                throw new TwitterRequestError(errorMessage);
-            }
-
-            return <Twitter.Api.SuccessResponse> resBody;
+            return <Twitter.Api.SuccessResponse> res.body;
         }
 
         protected static toSuperagentHeader(header: Twitter.Api.RequestHeader): Twitter.Api.RequestHeader {
@@ -137,12 +133,8 @@ export namespace BookmarksRequester {
             return superagentHeader;
         }
 
-        protected log(message: string) {
-            this.emit('log', message);
-        }
-
-        protected logRequest(url: string, header: Twitter.Api.RequestHeader) {
-            this.log(`Submitting GET request to ${url} with headers ${JSON.stringify(header)}`);
+        protected emitHttp(url: string, method: string, params: URLSearchParams, header: Twitter.Api.RequestHeader) {
+            this.emit('http', url, method, params, header);
         }
 
         stopRequestLoop() {

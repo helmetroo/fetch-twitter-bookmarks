@@ -109,9 +109,26 @@ export namespace Twitter {
         };
 
         export interface Error {
+            name?: string;
             code: number;
             message: string;
+            locations?: ErrorLocation[];
+            source?: string;
+            kind?: string;
+            tracing?: ErrorTrace;
+            extensions?: ErrorExtension[]
         };
+
+        export interface ErrorLocation {
+            line: number;
+            column: number;
+        };
+
+        export interface ErrorTrace {
+            trace_id: string;
+        };
+
+        export type ErrorExtension = Omit<Error, 'message' | 'locations'>;
 
         export interface SearchParams {
             count: number;
