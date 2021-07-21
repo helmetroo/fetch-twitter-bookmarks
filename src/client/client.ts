@@ -1,14 +1,14 @@
 import { URL } from 'url';
-import { writeFile as writeFileCb } from 'fs';
-import { promisify } from 'util';
+import { constants } from 'fs';
 
 import { BrowserType, chromium, firefox, webkit } from 'playwright';
 import type { Request, Response } from 'playwright';
 import { TypedEmitter } from 'tiny-typed-emitter';
 import { createLogger, format, transports } from 'winston';
 import type { Logger } from 'winston';
+import type { FileTransportInstance } from 'winston/lib/winston/transports';
 
-import rootPathTo from '../utils/root-path-to';
+import { PromisifiedFS } from '../utils/promisified-fs';
 import { Application } from '../constants/application';
 import { Twitter } from '../constants/twitter';
 import {
@@ -21,9 +21,12 @@ import {
     DumpFileError,
     TwitterLogoutError,
     RequesterError,
+    DatabaseRequiredError,
+    RemoveLogFileError
 } from '../constants/error';
 
 import fetchAvailableBrowsers from '../utils/fetch-available-browsers';
+import type { BrowserName } from '../utils/fetch-available-browsers';
 
 import Credentials, { AuthorizationCode } from './credentials';
 import PageManager from './page-manager';
@@ -31,9 +34,8 @@ import DataExtractor from './data-extractor';
 import { TweetsDB } from './tweets-db';
 import { BookmarksRequester } from './bookmarks-requester';
 
-export type BrowserName = 'chromium' | 'firefox' | 'webkit';
 type NameToBrowserType = {
-    [key in BrowserName]: BrowserType
+    [key in BrowserName]: BrowserType;
 };
 
 const NAME_TO_BROWSER: NameToBrowserType = {
@@ -62,15 +64,16 @@ export interface ClientEvents {
 
 export type ClientEventKey = keyof ClientEvents;
 
-const writeFile = promisify(writeFileCb);
-
 export default class Client extends TypedEmitter<ClientEvents> {
-    protected availableBrowserNames: string[];
+    protected availableBrowserNames: string[] = [];
 
-    protected pageManager: PageManager;
-    protected db: TweetsDB.Database;
+    protected pageManager: PageManager = new PageManager();
+    protected db?: TweetsDB.Database;
     protected bookmarksRequester?: BookmarksRequester.Requester;
-    protected logger: Logger;
+
+    protected logger?: Logger;
+    protected mainLogTransport?: FileTransportInstance;
+    protected exceptionLogTransport?: FileTransportInstance;
 
     protected currentState: State = State.NotReady;
     protected loggedIn: boolean = false;
@@ -101,51 +104,6 @@ export default class Client extends TypedEmitter<ClientEvents> {
         this.emit('transition', prevState, newState);
     }
 
-    constructor() {
-        super();
-
-        this.availableBrowserNames = [];
-
-        // TODO allow frontends to config
-        this.db = new TweetsDB.Database({
-            inMemory: false,
-            logging: this.logDebug.bind(this)
-        });
-        this.pageManager = new PageManager();
-        this.logger = createLogger({
-            transports: [
-                new transports.File({
-                    level: 'debug',
-                    format: format.combine(
-                        format.timestamp(),
-                        format.prettyPrint(),
-                        format.errors({
-                            stack: true
-                        }),
-                        Client.createFileLogFormatter(),
-                    ),
-                    filename: rootPathTo('/logs/debug.log')
-                })
-            ],
-
-            exceptionHandlers: [
-                new transports.File({
-                    filename: rootPathTo('/logs/exceptions.log')
-                })
-            ]
-        });
-    }
-
-    protected static createFileLogFormatter() {
-        return format.printf((info) => {
-            const logMessage = `${info.timestamp} [${info.level}]: ${info.message}`;
-
-            return info.stack
-                ? `${logMessage}\r\n\t${info.stack}`
-                : logMessage;
-        });
-    }
-
     protected emitNotice(message: string) {
         this.emit('notice', message);
     }
@@ -166,7 +124,7 @@ export default class Client extends TypedEmitter<ClientEvents> {
     }
 
     protected logDebug(message: string) {
-        this.logger.log({
+        this.logger?.log({
             level: 'debug',
             message
         })
@@ -190,7 +148,7 @@ export default class Client extends TypedEmitter<ClientEvents> {
     }
 
     protected logInternalError(err: ApplicationError) {
-        this.logger.error(err);
+        this.logger?.error(err);
     }
 
     protected assertPageManagerReady() {
@@ -217,19 +175,26 @@ export default class Client extends TypedEmitter<ClientEvents> {
 
     async initBrowser(browserName: BrowserName) {
         const browserType = NAME_TO_BROWSER[browserName];
-        if(!browserType) {
-            this.emitUserError(`Please choose from ${this.availableBrowserNamesInQuotes}.`);
-            return;
-        }
-
         this.pageManager.setBrowserType(browserType);
         await this.pageManager.init();
+
         this.emitNotice(`Browser set to ${browserName} and initialized. You may now login.`);
 
         this.state = State.LoggedOut;
     }
 
-    async initDb() {
+    async setDb(dbConfig: TweetsDB.Config) {
+        if(this.state === State.FetchingBookmarks) {
+            this.emitUserError('Already in the middle of fetching bookmarks. Stop fetching first.');
+            return;
+        }
+
+        if(this.db)
+            await this.closeDb();
+
+        dbConfig.logging = this.logDebug.bind(this);
+        this.db = new TweetsDB.Database(dbConfig);
+
         try {
             await this.db.init();
         } catch(err) {
@@ -237,18 +202,148 @@ export default class Client extends TypedEmitter<ClientEvents> {
             return;
         }
 
-        this.emitNotice('Bookmarks database ready.');
+        const dbReadyMessage = dbConfig.inMemory
+            ? 'In-memory database ready.'
+            : `Database at ${dbConfig.storagePath} ready.`;
+        this.emitNotice(dbReadyMessage);
     }
 
     async closeDb() {
         try {
-            await this.db.close();
+            await this.db?.close();
         } catch(err) {
             this.emitAndLogInternalError(err);
             return;
         }
 
         this.emitNotice('Closed connection to bookmarks database.');
+    }
+
+    setLogger(filename: string) {
+        if(!this.logger) {
+            this.createLoggerInstance(filename);
+            return;
+        }
+
+        this.updateLoggerInstance(filename);
+        this.emitNotice(`Logs are now being written to ${filename}.`);
+    }
+
+    protected createLoggerInstance(filename: string) {
+        this.mainLogTransport = Client.createMainLogTransport(filename);
+        this.exceptionLogTransport = Client.createExceptionLogTransport(filename);
+
+        this.logger = createLogger({
+            transports: this.mainLogTransport,
+            exceptionHandlers: this.exceptionLogTransport
+        });
+    }
+
+    protected replaceLoggerInstance(filename: string) {
+        this.removeMainLogTransport();
+        this.updateMainLogTransport(filename);
+
+        this.removeExceptionLogTransport();
+        this.updateExceptionLogTransport(filename);
+    }
+
+    protected updateLoggerInstance(filename: string) {
+        this.updateMainLogTransport(filename);
+        this.updateExceptionLogTransport(filename);
+    }
+
+    protected updateMainLogTransport(filename: string) {
+        this.mainLogTransport = Client.createMainLogTransport(filename);
+        this.logger?.add(this.mainLogTransport);
+    }
+
+    protected updateExceptionLogTransport(filename: string) {
+        this.exceptionLogTransport = Client.createExceptionLogTransport(filename);
+        this.logger?.exceptions.handle(this.exceptionLogTransport);
+    }
+
+    protected removeMainLogTransport() {
+        if(this.mainLogTransport)
+            this.logger?.remove(this.mainLogTransport);
+    }
+
+    protected removeExceptionLogTransport() {
+        if(this.exceptionLogTransport)
+            this.logger?.exceptions?.unhandle(this.exceptionLogTransport);
+    }
+
+    async clearLog(givenFilename?: string) {
+        // NOTE assumes main and exception logs are written to same file
+        const logFilename = givenFilename
+            ?? this.mainLogTransport?.filename;
+        if(!logFilename) {
+            this.emitNotice('No log file to clear.');
+            return;
+        }
+
+        this.removeMainLogTransport();
+        this.removeExceptionLogTransport();
+
+        try {
+            await PromisifiedFS.access(logFilename, constants.F_OK);
+        } catch(err) {
+            this.emitNotice('No log file to clear.');
+            return;
+        }
+
+        try {
+            await PromisifiedFS.rm(logFilename);
+        } catch(err) {
+            const logFileErr = new RemoveLogFileError(err, 'Unable to remove log file.');
+            this.emitAndLogInternalError(logFileErr);
+            return;
+        } finally {
+            this.updateMainLogTransport(logFilename);
+            this.updateExceptionLogTransport(logFilename);
+        }
+
+        this.emitNotice(`Logs at ${logFilename} were cleared.`);
+    }
+
+    protected static createMainLogTransport(filename: string) {
+        const logEntryFormatter = Client.createLogEntryFormatter();
+        return new transports.File({
+            level: 'debug',
+            format: logEntryFormatter,
+            filename
+        });
+    }
+
+    protected static createExceptionLogTransport(filename: string) {
+        const logEntryFormatter = Client.createLogEntryFormatter();
+        return new transports.File({
+            format: logEntryFormatter,
+            filename
+        });
+    }
+
+    protected static createLogEntryFormatter() {
+        return format.combine(
+            format.timestamp({
+                format: 'YYYY-MM-DD HH:mm:ss'
+            }),
+            format.align(),
+            format.prettyPrint(),
+            format.errors({
+                stack: true
+            }),
+            Client.createLogMessageFormatter()
+        );
+    }
+
+    protected static createLogMessageFormatter() {
+        return format.printf((info) => {
+            const logMessage = `${info.timestamp} [${info.level}]: ${info.message}`;
+
+            return info.stack
+                ? `${logMessage}\r\n\t${info.stack}`
+                : logMessage;
+        });
     }
 
     async logIn(credentials: Credentials) {
@@ -358,7 +453,7 @@ export default class Client extends TypedEmitter<ClientEvents> {
         // TODO allow user to specify cursor or options specifying if they want to use the last cursor or not
         try {
             const config = await this.generateRequesterConfig();
-            const lastSavedCursor = await this.db.getCursorState();
+            const lastSavedCursor = await this.db?.getCursorState();
             if(lastSavedCursor) {
                 config.initialCursor = lastSavedCursor;
                 this.emitNotice(`Retrieving bookmarks from last cursor: ${lastSavedCursor.bottom}`);
@@ -376,8 +471,8 @@ export default class Client extends TypedEmitter<ClientEvents> {
     }
 
     protected async saveCursorAndBookmarks(cursor: Application.Cursor, bookmarks: Application.Tweet[]) {
-        await this.db.persistCursorState(cursor);
-        await this.db.insertTweets(bookmarks);
+        await this.db?.persistCursorState(cursor);
+        await this.db?.insertTweets(bookmarks);
     }
 
     protected async generateRequesterConfig() {
@@ -475,9 +570,14 @@ export default class Client extends TypedEmitter<ClientEvents> {
     }
 
     async dumpBookmarks(filePath: string) {
+        if(!this.db) {
+            const noDbInitErr = new DatabaseRequiredError('The bookmarks database has not been initialized.');
+            this.emitAndLogInternalError(noDbInitErr);
+            return;
+        }
+
         let authors: TweetsDB.Author[] = [];
         let bookmarks: TweetsDB.Tweet[] = [];
-
         let authorObjs: object[] = [];
         let bookmarkObjs: object[] = [];
         try {
@@ -499,12 +599,12 @@ export default class Client extends TypedEmitter<ClientEvents> {
                 bookmarks: bookmarkObjs
             });
 
-            await writeFile(filePath, serializedBookmarks, 'utf8');
+            await PromisifiedFS.write(filePath, serializedBookmarks, 'utf8');
             this.emitNotice(`${bookmarks.length} bookmarks have been successfully dumped to ${filePath}.`)
         } catch(err) {
             const dumpErrorMsg = [
                 `Unable to save bookmarks at ${filePath}.`,
-                `The disk may be full/not responding or you have insufficient permissions.`
+                `The disk may be full, not responding, or you have insufficient permissions.`
             ].join('\r\n');
             const dumpErr = new DumpFileError(err, dumpErrorMsg);
             this.emitAndLogInternalError(dumpErr);

@@ -211,3 +211,27 @@ export class DatabaseError extends ApplicationError {
         this.name = 'DatabaseError';
     }
 }
+
+export class DatabaseRequiredError extends ApplicationError {
+    constructor(
+        userMessage: string
+    ) {
+        super({
+            userMessage
+        });
+        this.name = 'DatabaseRequiredError';
+    }
+}
+
+export class RemoveLogFileError extends ApplicationError {
+    constructor(
+        sourceError: Error,
+        userMessage: string
+    ) {
+        super({
+            sourceError,
+            userMessage
+        });
+        this.name = 'RemoveLogFileError';
+    }
+}

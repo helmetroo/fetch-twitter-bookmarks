@@ -1,5 +1,7 @@
 import { chromium, webkit, firefox, BrowserType } from 'playwright';
 
+export type BrowserName = 'chromium' | 'firefox' | 'webkit';
+
 export default async function fetchAvailableBrowsers() {
     let availableBrowsers: BrowserType[] = [];
     const allBrowsers = [chromium, webkit, firefox];
@@ -13,12 +15,12 @@ export default async function fetchAvailableBrowsers() {
     return availableBrowsers.map(browser => {
         return {
             browser,
-            name: browser.name()
+            name: <BrowserName> browser.name()
         }
     });
 }
 
 export interface AvailableBrowser {
     browser: BrowserType,
-    name: string
+    name: BrowserName
 };

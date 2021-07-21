@@ -1,4 +1,7 @@
+import rootPathTo from '../utils/root-path-to';
+
 import { Twitter } from './twitter';
+import { TweetsDB } from '../client/tweets-db';
 
 export namespace Application {
     export interface Tweet
@@ -23,5 +26,16 @@ export namespace Application {
     export interface Cursor {
         top: string;
         bottom: string;
+    }
+
+    export namespace Defaults {
+        export const DEBUG_LOG_FILENAME = rootPathTo('/logs/debug.log');
+
+        export const DATABASE_NAME = 'twitter-bookmarks';
+        export const DATABASE_PATH = rootPathTo(`/${DATABASE_NAME}.db`);
+        export const DB_CONFIG: TweetsDB.Config = {
+            inMemory: false,
+            storagePath: DATABASE_PATH
+        };
     }
 }

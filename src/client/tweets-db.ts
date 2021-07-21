@@ -14,7 +14,6 @@ import {
 
 import uniqBy from 'lodash.uniqby';
 
-import rootPathTo from '../utils/root-path-to';
 import { Application } from '../constants/application';
 import { Twitter } from '../constants/twitter';
 import { DatabaseError } from '../constants/error';
@@ -166,23 +165,14 @@ export namespace TweetsDB {
     export interface Config {
         inMemory: boolean;
         storagePath?: string;
-        logging: false | NonNullable<Options['logging']>;
+        logging?: false | NonNullable<Options['logging']>;
     };
 
     export class Database {
-        static readonly DEFAULT_DATABASE_NAME = 'twitter-bookmarks';
-        static readonly DEFAULT_DATABASE_PATH = rootPathTo(`/${Database.DEFAULT_DATABASE_NAME}.db`);
-
-        static readonly DEFAULT_CONFIG: Config = {
-            inMemory: false,
-            storagePath: Database.DEFAULT_DATABASE_PATH,
-            logging: false
-        };
-
         protected readonly db: Sequelize;
 
         constructor(
-            readonly config: Config = Database.DEFAULT_CONFIG
+            readonly config: Config
         ) {
             const sequelizeOptions: Options = {
                 dialect: 'sqlite',
@@ -191,14 +181,11 @@ export namespace TweetsDB {
             if(config.inMemory)
                 sequelizeOptions.storage = ':memory:';
             else {
-                sequelizeOptions.storage = config.storagePath
-                    ? config.storagePath
-                    : Database.DEFAULT_CONFIG.storagePath;
+                sequelizeOptions.storage = config.storagePath;
             }
 
-            sequelizeOptions.logging = config.logging
-                ? config.logging
-                : Database.DEFAULT_CONFIG.logging;
+            if(config.logging)
+                sequelizeOptions.logging = config.logging;
 
             this.db = new Sequelize(sequelizeOptions);
 

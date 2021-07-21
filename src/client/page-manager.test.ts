@@ -1,4 +1,6 @@
-import PageManager, { PATHNAMES } from './page-manager';
+import { Twitter } from '../constants/twitter';
+
+import PageManager from './page-manager';
 import { INVALID_CREDENTIALS } from './credentials';
 
 const testSuiteFor = describe.each(global.availableBrowsers);
@@ -17,7 +19,7 @@ testSuiteFor('PageManager', ({ browser }) => {
 
         await pageManager.init();
         await pageManager.logIn(INVALID_CREDENTIALS);
-        const atLogInError = pageManager.currentUrlHasPath(PATHNAMES.logInError);
+        const atLogInError = pageManager.currentUrlHasPath(Twitter.Url.PATHNAMES.logInError);
         await pageManager.tearDown();
 
         expect(atLogInError).toBeTruthy();

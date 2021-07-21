@@ -1,9 +1,75 @@
 import Vorpal from 'vorpal';
 
+import { Application } from '../constants/application';
 import { LoginErrorType, TwitterLoginError } from '../constants/error';
+import { BrowserName } from '../utils/fetch-available-browsers';
+
 import Client, { State } from '../client/client';
-import type { ErrorType as ClientErrorType, BrowserName } from '../client/client';
+import type { ErrorType as ClientErrorType } from '../client/client';
 import Credentials, { AuthorizationCode } from '../client/credentials';
+
+interface Argument {
+    shortName?: string;
+    longName: string;
+    params?: string;
+}
+
+const inMemoryArg = {
+    shortName: 'm',
+    longName: 'in-memory'
+} as const;
+type InMemoryArg =
+    typeof inMemoryArg['shortName']
+    | typeof inMemoryArg['longName'];
+
+const dbFileArg = {
+    shortName: 'f',
+    longName: 'db',
+    params: '<filename>'
+} as const;
+type DbFileArg =
+    typeof dbFileArg['shortName']
+    | typeof dbFileArg['longName'];
+
+const defaultDbArg = {
+    shortName: 'd',
+    longName: 'default'
+} as const;
+type DefaultDbArg =
+    typeof defaultDbArg['shortName']
+    | typeof defaultDbArg['longName'];
+
+const logFileArg = {
+    shortName: 'l',
+    longName: 'log-file',
+    params: '<filename>'
+} as const;
+type LogFileArg =
+    typeof logFileArg['shortName']
+    | typeof logFileArg['longName'];
+
+const clearLogArg = {
+    longName: 'clear-log',
+} as const;
+type ClearLogArg = typeof clearLogArg['longName'];
+
+type CommandLineArgs = {
+    [k in InMemoryArg]?: boolean;
+} & {
+    [k in DbFileArg]?: string;
+} & {
+    [k in DefaultDbArg]?: boolean;
+} & {
+    [k in LogFileArg]?: string;
+} & {
+    [k in ClearLogArg]?: string;
+};
+
+interface CommandOption {
+    name: string;
+    help: string;
+    autocomplete?: string[];
+}
 
 abstract class Command {
     protected abstract readonly identifier: string;
@@ -11,6 +77,7 @@ abstract class Command {
     protected readonly action: Vorpal.Action = this.createActionHandler(this.cli);
     protected readonly aliases?: string[];
     protected readonly autocomplete?: string[];
+    protected readonly options?: CommandOption[];
     protected ref?: Vorpal.Command;
 
     constructor(protected readonly cli: CommandLineFrontend) {}
@@ -25,6 +92,18 @@ abstract class Command {
         if(this.aliases)
             this.aliases.forEach(alias => ref.alias(alias));
 
+        if(this.options) {
+            this.options.forEach(option => {
+                const {
+                    name,
+                    help,
+                    autocomplete
+                } = option;
+
+                ref.option(name, help, autocomplete);
+            });
+        }
+
         this.ref = ref;
     }
 
@@ -33,6 +112,18 @@ abstract class Command {
     }
 
     protected abstract createActionHandler(cli: CommandLineFrontend): Vorpal.Action;
+
+    static toVorpalOptions(args: Argument) {
+        const {
+            shortName: shortName,
+            longName: longName,
+            params
+        } = args;
+
+        return params
+            ? `-${shortName}, --${longName} ${params}`
+            : `-${shortName}, --${longName}`;
+    }
 }
 
 class SetBrowserCommand extends Command {
@@ -59,6 +150,71 @@ class SetBrowserCommand extends Command {
         return async function(this: Vorpal.CommandInstance, args: Vorpal.Args) {
             const browserName = <BrowserName> args.name;
             await cli.initClientBrowser(browserName);
+        };
+    }
+}
+
+class SetDatabaseCommand extends Command {
+    protected readonly identifier: string = 'set-database';
+    protected readonly description: string = 'Sets the database fetched bookmarks are saved to.';
+    protected readonly aliases: string[] = ['set-db', 'db'];
+    protected readonly options: CommandOption[] = [{
+        name: Command.toVorpalOptions(inMemoryArg),
+        help: `Database is kept in memory. Ignored if --${dbFileArg.longName} is set. WARNING: All bookmarks will be lost when you exit.`
+    }, {
+        name: Command.toVorpalOptions(dbFileArg),
+        help: `Saves bookmarks database to a file. Ignored if --${inMemoryArg.longName} is set.`
+    }, {
+        name: Command.toVorpalOptions(defaultDbArg),
+        help: `Saves bookmarks database to the default location. Ignored if either --${dbFileArg.longName} or --${inMemoryArg.longName} are set.`
+    }];
+
+    protected createActionHandler(cli: CommandLineFrontend) {
+        const self = this;
+        return async function(this: Vorpal.CommandInstance, args: Vorpal.Args) {
+            const opts = args.options;
+            const noOptsProvided = SetDatabaseCommand.noOptsProvided(opts);
+            if(noOptsProvided) {
+                this.log(`Please provide at least one option. Run \`help ${self.identifier}\` for info on options.`);
+                return;
+            }
+
+            await cli.setClientDbFromArgs(opts);
+        };
+    }
+
+    protected static noOptsProvided(opts: CommandLineArgs) {
+        const argsToCheck = [
+            dbFileArg,
+            inMemoryArg,
+            defaultDbArg
+        ];
+
+        return argsToCheck.every(
+            arg => !opts[arg.shortName] && !opts[arg.longName]
+        );
+    }
+}
+
+class SetLogCommand extends Command {
+    protected readonly identifier: string = 'set-log <filename>';
+    protected readonly description: string = 'Sets the location for log files.';
+
+    protected createActionHandler(cli: CommandLineFrontend) {
+        return async function(this: Vorpal.CommandInstance, args: Vorpal.Args) {
+            const filename = <string> args.filename;
+            cli.setClientLogFromFilename(filename);
+        };
+    }
+}
+
+class ClearLogCommand extends Command {
+    protected readonly identifier: string = 'clear-log';
+    protected readonly description: string = 'Clears log files.';
+
+    protected createActionHandler(cli: CommandLineFrontend) {
+        return async function(this: Vorpal.CommandInstance) {
+            await cli.clearLog();
         };
     }
 }
@@ -198,12 +354,12 @@ class StopFetchBookmarksCommand extends Command {
 }
 
 class DumpBookmarksCommand extends Command {
-    protected readonly identifier: string = 'dump <file>';
+    protected readonly identifier: string = 'dump <filename>';
     protected readonly description: string = 'Dump saved bookmarks to a JSON file.';
 
     protected createActionHandler(cli: CommandLineFrontend): Vorpal.Action {
         return async function(this: Vorpal.CommandInstance, args: Vorpal.Args) {
-            const filePath = <string> args.file;
+            const filePath = <string> args.filename;
             await cli.dumpBookmarks(filePath);
         }
     }
@@ -243,10 +399,9 @@ export default class CommandLineFrontend {
         this.assertIsTTY();
         this.show();
         this.subscribeToClientEvents();
-        await this.initClientDb();
+        await this.processCliArgs();
         await this.initCommands();
     }
-
 
     protected show() {
         this.shell = this.shell
@@ -254,30 +409,105 @@ export default class CommandLineFrontend {
             .show();
     }
 
-    protected async initClientDb() {
-        await this.client.initDb();
+    protected async processCliArgs() {
+        const cliArgs =
+            <CommandLineArgs> this.shell.parse(process.argv, {
+                use: 'minimist'
+            });
+
+        await this.handleCliArgs(cliArgs);
+    }
+
+    protected async handleCliArgs(args: CommandLineArgs) {
+        await this.setClientDbFromArgs(args);
+        await this.setupLogFromArgs(args);
+    }
+
+    async setClientDbFromArgs(args: CommandLineArgs) {
+        const config = Application.Defaults.DB_CONFIG;
+
+        const useDefaultDb =
+            (args[defaultDbArg.longName] || args[defaultDbArg.shortName])
+            ?? false;
+        if(useDefaultDb) {
+            return this.client.setDb(config);
+        }
+
+        const inMemory =
+            (args[inMemoryArg.longName] || args[inMemoryArg.shortName])
+            ?? false;
+        if(inMemory) {
+            config.inMemory = inMemory;
+            return this.client.setDb(config);
+        }
+
+        const filename =
+            (args[dbFileArg.longName] || args[dbFileArg.shortName])
+            ?? Application.Defaults.DATABASE_PATH;
+        if(filename) {
+            config.storagePath = filename;
+            config.inMemory = false;
+        }
+
+        return this.client.setDb(config);
+    }
+
+    protected static extractLogFilenameFromArgs(args: CommandLineArgs) {
+        return (args[logFileArg.longName] || args[logFileArg.shortName])
+            ?? Application.Defaults.DEBUG_LOG_FILENAME;
+    }
+
+    protected async setupLogFromArgs(args: CommandLineArgs) {
+        const logFilename = CommandLineFrontend.extractLogFilenameFromArgs(args);
+        const clearLog = args[clearLogArg.longName] ?? false;
+
+        if(clearLog)
+            await this.clearLog(logFilename);
+
+        this.setClientLogFromFilename(logFilename);
+    }
+
+    setClientLogFromArgs(args: CommandLineArgs) {
+        const logFilename =
+            (args[logFileArg.longName] || args[logFileArg.shortName])
+            ?? Application.Defaults.DEBUG_LOG_FILENAME;
+
+        this.setClientLogFromFilename(logFilename);
+    }
+
+    setClientLogFromFilename(filename: string) {
+        this.client.setLogger(filename);
+    }
+
+    async clearLog(filename?: string) {
+        await this.client.clearLog(filename);
     }
 
     protected async initCommands() {
         this.globalCommands = [
             // new QueryBookmarksCommand(this),
             new DumpBookmarksCommand(this),
+            new SetLogCommand(this),
+            new ClearLogCommand(this),
         ];
         this.globalCommands.forEach(command => command.attach(this.shell));
 
         const browserNames = await this.client.determineAvailableBrowsers();
         this.stateCommands[State.NotReady] = [
+            new SetDatabaseCommand(this),
             new SetBrowserCommand(this, browserNames)
         ];
         this.stateCommands[State.NotReady]
             .forEach(command => command.attach(this.shell));
 
         this.stateCommands[State.LoggedOut] = [
+            new SetDatabaseCommand(this),
             new LoginCommand(this),
             new EndCommand(this),
         ];
 
         this.stateCommands[State.LoggedIn] = [
+            new SetDatabaseCommand(this),
             new FetchBookmarksCommand(this),
             new EndCommand(this),
         ];
@@ -336,6 +566,7 @@ export default class CommandLineFrontend {
     }
 
     async end() {
+        // TODO may want to wait until any logs have been written
         await this.client.end();
     }
 }

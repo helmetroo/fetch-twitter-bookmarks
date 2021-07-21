@@ -1,19 +1,12 @@
-import { promisify } from 'util';
 import {
-    access as accessCb,
-    rename as renameCb,
-    rm as rmCb,
     constants
 } from 'fs';
 import faker from 'faker';
 
 import rootPathTo from '../utils/root-path-to';
+import { PromisifiedFS } from '../utils/promisified-fs';
 import { Application } from '../constants/application';
 import { TweetsDB } from './tweets-db';
-
-const access = promisify(accessCb);
-const rename = promisify(renameCb);
-const rm = promisify(rmCb);
 
 function createFakeId() {
     return faker.datatype.number({
@@ -138,8 +131,6 @@ function createFakeCursor() {
 }
 
 const TEST_DB_PATH = rootPathTo('test-twitter-bookmarks.db');
-const DEFAULT_DB_PATH = TweetsDB.Database.DEFAULT_DATABASE_PATH;
-const TEMP_DEFAULT_DB_PATH = `${DEFAULT_DB_PATH}.tmp`;
 
 describe('TweetsDB', () => {
     it('Should setup the database to be in memory if requested, then shut down', () => {
@@ -154,28 +145,6 @@ describe('TweetsDB', () => {
         }).not.toThrow();
     });
 
-    it('Should setup the database at the default path if no options are provided', async () => {
-        let defaultDbAlreadyExists = false;
-        try {
-            await access(DEFAULT_DB_PATH, constants.F_OK);
-            defaultDbAlreadyExists = true;
-        } catch(err) {}
-        if(defaultDbAlreadyExists)
-            await rename(DEFAULT_DB_PATH, TEMP_DEFAULT_DB_PATH);
-
-        const db = new TweetsDB.Database();
-        await db.init();
-        await db.close();
-
-        expect(async () => {
-            await access(DEFAULT_DB_PATH, constants.F_OK);
-            await rm(DEFAULT_DB_PATH);
-
-            if(defaultDbAlreadyExists)
-                await rename(TEMP_DEFAULT_DB_PATH, DEFAULT_DB_PATH);
-        }).not.toThrow();
-    });
-
     it('Should setup a database at a given path', async () => {
         const db = new TweetsDB.Database({
             inMemory: false,
@@ -186,8 +155,8 @@ describe('TweetsDB', () => {
         await db.close();
 
         expect(async () => {
-            await access(TEST_DB_PATH, constants.F_OK);
-            await rm(TEST_DB_PATH);
+            await PromisifiedFS.access(TEST_DB_PATH, constants.F_OK);
+            await PromisifiedFS.rm(TEST_DB_PATH);
         }).not.toThrow();
     });
 
