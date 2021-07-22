@@ -24,7 +24,7 @@ type InMemoryArg =
 
 const dbFileArg = {
     shortName: 'f',
-    longName: 'db',
+    longName: 'file',
     params: '<filename>'
 } as const;
 type DbFileArg =
@@ -74,6 +74,7 @@ interface CommandOption {
 abstract class Command {
     protected abstract readonly identifier: string;
     protected abstract readonly description: string;
+    protected readonly params?: string;
     protected readonly action: Vorpal.Action = this.createActionHandler(this.cli);
     protected readonly aliases?: string[];
     protected readonly autocomplete?: string[];
@@ -83,7 +84,11 @@ abstract class Command {
     constructor(protected readonly cli: CommandLineFrontend) {}
 
     attach(app: Vorpal) {
-        const ref = app.command(this.identifier, this.description)
+        const fullIdentifier = (this.params)
+            ? `${this.identifier} ${this.params}`
+            : this.identifier;
+
+        const ref = app.command(fullIdentifier, this.description)
             .action(this.action);
 
         if(this.autocomplete)
@@ -127,10 +132,11 @@ abstract class Command {
 }
 
 class SetBrowserCommand extends Command {
-    protected readonly identifier: string = 'browser <name>';
+    protected readonly identifier: string = 'set-browser';
+    protected readonly params: string = '<name>';
     protected readonly description: string;
     protected readonly autocomplete: string[];
-    protected readonly aliases: string[] = ['set-browser'];
+    protected readonly aliases: string[] = ['browser'];
 
     constructor(
         protected readonly cli: CommandLineFrontend,
@@ -156,14 +162,15 @@ class SetBrowserCommand extends Command {
 
 class SetDatabaseCommand extends Command {
     protected readonly identifier: string = 'set-database';
-    protected readonly description: string = 'Sets the database fetched bookmarks are saved to.';
-    protected readonly aliases: string[] = ['set-db', 'db'];
+    protected readonly params: string = '<filename>';
+    protected readonly description: string = 'Sets the database fetched bookmarks are saved to. Providing <filename> is the same as setting --${dbFileArg.longName}.';
+    protected readonly aliases: string[] = ['database', 'set-db', 'db'];
     protected readonly options: CommandOption[] = [{
         name: Command.toVorpalOptions(inMemoryArg),
-        help: `Database is kept in memory. Ignored if --${dbFileArg.longName} is set. WARNING: All bookmarks will be lost when you exit.`
+        help: `Database is stored in-memory. Ignored if --${dbFileArg.longName} or --${defaultDbArg.longName} is set. WARNING: All bookmarks will be lost when you exit.`
     }, {
         name: Command.toVorpalOptions(dbFileArg),
-        help: `Saves bookmarks database to a file. Ignored if --${inMemoryArg.longName} is set.`
+        help: `Saves bookmarks database to a file. Ignored if --${inMemoryArg.longName} or --${defaultDbArg.longName} is set.`
     }, {
         name: Command.toVorpalOptions(defaultDbArg),
         help: `Saves bookmarks database to the default location. Ignored if either --${dbFileArg.longName} or --${inMemoryArg.longName} are set.`
@@ -172,10 +179,22 @@ class SetDatabaseCommand extends Command {
     protected createActionHandler(cli: CommandLineFrontend) {
         const self = this;
         return async function(this: Vorpal.CommandInstance, args: Vorpal.Args) {
+            // If no opts given, only param is filename
+            const filename = <string> args.filename;
+            if(filename) {
+                const filenameKey = dbFileArg.longName;
+                await cli.setClientDbFromArgs({
+                    [filenameKey]: filename
+                });
+
+                return;
+            }
+
+            // Otherwise opts must be given
             const opts = args.options;
             const noOptsProvided = SetDatabaseCommand.noOptsProvided(opts);
             if(noOptsProvided) {
-                this.log(`Please provide at least one option. Run \`help ${self.identifier}\` for info on options.`);
+                this.log(`Please provide at least one option. Run \`help ${self.identifier}\` or \`${self.identifier} --help\`for info on options.`);
                 return;
             }
 
@@ -197,7 +216,8 @@ class SetDatabaseCommand extends Command {
 }
 
 class SetLogCommand extends Command {
-    protected readonly identifier: string = 'set-log <filename>';
+    protected readonly identifier: string = 'set-log';
+    protected readonly params: string = '<filename>';
     protected readonly description: string = 'Sets the location for log files.';
 
     protected createActionHandler(cli: CommandLineFrontend) {
@@ -334,6 +354,7 @@ class EndCommand extends Command {
 class FetchBookmarksCommand extends Command {
     protected readonly identifier: string = 'fetch';
     protected readonly description: string = 'Starts fetching bookmarks.';
+    protected readonly aliases: string[] = ['start'];
 
     protected createActionHandler(cli: CommandLineFrontend): Vorpal.Action {
         return async function() {
@@ -354,7 +375,8 @@ class StopFetchBookmarksCommand extends Command {
 }
 
 class DumpBookmarksCommand extends Command {
-    protected readonly identifier: string = 'dump <filename>';
+    protected readonly identifier: string = 'dump';
+    protected readonly params: string = '<filename>';
     protected readonly description: string = 'Dump saved bookmarks to a JSON file.';
 
     protected createActionHandler(cli: CommandLineFrontend): Vorpal.Action {
