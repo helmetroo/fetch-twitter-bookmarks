@@ -26,9 +26,9 @@
 
 <a name="how-it-works"></a>
 # How it works
-At the moment, Twitter offers no means through their current developer API enabling you to fetch your bookmarks, but there is a means to do so through an API endpoint the bookmarks page references (see below). I'm aware [their team is working on it](https://twittercommunity.com/t/twitter-bookmarks-not-accessible-via-the-api/142160), though.
+At the moment, Twitter offers no means through their current developer API enabling you to fetch your bookmarks. However, there's a means to do so through an API endpoint the bookmarks page references (see below). I'm aware [their team is working on it](https://twittercommunity.com/t/twitter-bookmarks-not-accessible-via-the-api/142160), though.
 
-1. To be able to leverage this API endpoint, you will need to login to Twitter's site, which this application will do on your behalf through a headless browser, handled by [playwright](https://playwright.dev/). If Twitter prompts you for a code to log in (either because you have 2FA turned on or because they suspect a "suspicious" login), you'll then be prompted for your authentication code. 
+1. To leverage this API endpoint, you'll need to login on Twitter's site, which this application will do on your behalf via a headless browser ([playwright](https://playwright.dev/)). If Twitter prompts you for a code to log in (either because you have 2FA turned on or because they suspect a "suspicious" login), you'll then be prompted for your authentication code. 
 
 2. When you wish to start fetching bookmarks, the browser navigates to the bookmarks page, and watches for a network request to a specific API endpoint matching this pattern:
 
@@ -44,11 +44,11 @@ The query parameter `variables` is url-encoded JSON, and represents the query pa
 
 There are certain request headers the API seems to expect (i.e. an authorization token), which is the sole reason why the step of logging you in with a browser is necessary for the app to fetch data from this endpoint.
 
-A successful response returns the most recent bookmarks (the same ones you see when you initially load the bookmarks page). Also present in the response is a cursor (string), a necessary marker to fetch another set of bookmarks. The most recent bookmarks from that initial response will be saved if the application doesn't have a cursor to fetch the next set of bookmarks from (which will most likely be the case if you're running it for the first time). This cursor also enables the application to resume fetching bookmarks from the last successful point in case of an error, or if you decide to stop.
+A successful response returns the most recent bookmarks you've saved to your account. Also present in the response is a cursor (string), a marker necessary to fetch the next page of bookmarks. The most recent bookmarks from this initial response will be saved if the application doesn't have a cursor to fetch the next set of bookmarks from (most likely the case if you're running it for the first time). This cursor also enables the application to resume fetching bookmarks from the last successful attempt in case of an error, or if you decide to stop.
 
 3. Using said response, [superagent](https://visionmedia.github.io/superagent/) then makes subsequent requests to the API URL, and fetches as many bookmarks as possible. An intentional delay of 300ms is added in between these subsequent responses to pretend like a human is scrolling through the bookmarks page; an option to change/remove that delay will be added later. Upon each successful response, the bookmarks and the next cursor are saved to the database. 
 
-There will be a option later to let you set the cursor yourself, or begin fetching bookmarks from the top.
+There will be an option later to let you set the cursor yourself, or begin fetching bookmarks from the beginning.
 
 
 <a name="important"></a>
@@ -69,7 +69,7 @@ Because this application uses a headless browser to log in on your behalf, you'l
 ## Requirements
 
 I've only run this on the following node and npm versions, on Windows 10 with WSL2 running Ubuntu. 
-There's a chance it may run on earlier versions, but I haven't tested this.
+There's a chance it may run on earlier node/npm versions, but I haven't tested this.
 
 * `node` >= 14.x
 * `npm` >= 7.x
@@ -106,9 +106,9 @@ npm start
 See the [arguments section](#arguments) for more details about the arguments you can provide and how to provide them.
 
 1. When you first run the app, you'll see a list of browsers you can run. Run the command `set-browser <name>` (alias `browser`). `<name>` can be any one of the available browser choices runnable on your machine, which you can see with `help`.
-2. After you've set the browser, you can now `login` (aliases `signin`, `authenticate`). You'll be prompted for your credentials. If login was successful, you'll see a success message and can start fetching bookmarks. However, you may be prompted to login with your username/phone only, or be asked to provide a specific authorization code (2FA or other identification code Twitter may ask you for to make sure it's you).
+2. After you set the browser, you can `login` (aliases `signin`, `authenticate`). You'll be prompted for your credentials. If login was successful, you'll see a success message and can start fetching bookmarks. However, you may be prompted to login with your username/phone only, or be asked to provide a specific authorization code (2FA or other identification code Twitter may ask you for to make sure it's you).
 3. You can start fetching bookmarks with `fetch` (alias `start`). The browser will navigate to the bookmarks page, watch for a call to the bookmarks API (see [how it works](#how-it-works) for more info on this), then repeatedly make calls to this API until no more bookmarks can be fetched (either because there are no more to fetch, or an error was encountered). You can stop fetching at any time with the `stop` command.
-4. When you're finished, you can either end your session with `end` (alias `close`), if you want to choose a different browser, or you can `exit` the application entirely. Both commands will log you out first if you had already signed in.
+4. When you're finished, you can either end your session with `end` (alias `close`), if you want to choose a different browser, or you can `exit` the application entirely. Both commands will log you out first if you were signed in.
 
 At any time, you can dump bookmarks saved in the database to a JSON file with the `dump <filename>` command. See the [filenames](#filenames) section for how filenames are resolved.
 
@@ -129,11 +129,11 @@ Shows help prompt for all currently available commands.
 
 #### `set-browser <name>` (alias `browser`)
 
-Sets the browser. Necessary to begin logging in and fetching bookmarks. Browser choices available to you are determined each time you start the app. To change browsers after you have already set, run `end`, then choose another browser.
+Sets the browser. Necessary to log in and fetch bookmarks. Browser choices available to you are determined each time you start the app. To change browsers after setting a browser, run `end`, then choose another browser.
 
 #### `set-database <filename>` (aliases `database`, `set-db`, `db`)
 
-Sets the database that bookmarks are saved to. Not available if you are in the middle of fetching bookmarks.
+Sets the database bookmarks are saved to. Command not available if you are in the middle of fetching bookmarks.
 Providing `<filename>` is the same as setting `-f` or `--file`.
 
 ##### Options
@@ -151,19 +151,19 @@ Clears the current log file by removing it and creating a new empty file.
 
 #### `login` (aliases `signin` and `authenticate`)
 
-Log in to Twitter. Necessary to begin fetching bookmarks. Available after you have set browser (see above).
+Log in to Twitter. Necessary to begin fetching bookmarks. Available after you've set the browser (see above).
 
 #### `fetch` (alias `start`)
 
-Begins fetching bookmarks. Bookmarks will be fetched from either the last saved cursor, or from the very beginning if the app hasn't saved a cursor to the bookmarks database. Available after you have set a browser and logged in.
+Begins fetching bookmarks. Bookmarks will be fetched from either the last saved cursor, or from the very beginning if the app hasn't saved a cursor to the bookmarks database. Command available after you've set a browser and logged in.
 
 #### `stop` 
 
-Stops fetching bookmarks. Available when you are in the middle of fetching bookmarks.
+Stops fetching bookmarks. Command available while you're fetching bookmarks.
 
 #### `end` 
 
-Ends your session. Bookmarks will stop being fetched, and you will also be logged out. Run when you want to switch browsers and/or accounts.
+Ends your session. Bookmarks will stop being fetched, and you'll also be logged out. Run when you want to switch browsers and/or accounts.
 
 #### `dump <filename>`
 
@@ -190,8 +190,8 @@ npm start -- -f $HOME/bookmarks.db
 
 <a name="logging"></a>
 ## Logging
-Network requests and more details about internal errors not shown in the app are saved to log files via [winston](https://github.com/winstonjs/winston).
-The default location logs are stored is at `$APP_ROOT/logs/debug.log`.
+Network requests, and full details of internal errors not shown to you are saved to log files via [winston](https://github.com/winstonjs/winston).
+The default location for logs is `$APP_ROOT/logs/debug.log`.
 
 <a name="database"></a>
 ## Database
@@ -199,7 +199,7 @@ Bookmarked tweets, and available metadata for their respective authors, as well 
 
 Definitions for the database schema for bookmarked tweets and their authors can be found in [tweets-db.ts](./src/client/tweets-db.ts).
 
-TypeScript interfaces for bookmarked tweets and their authors can be found in [twitter.ts](./src/constants/twitter.ts). The interfaces are based off successful responses from the bookmarks API endpoint in Chrome DevTools and making speculations.
+TypeScript interfaces for bookmarked tweets and their authors are in [twitter.ts](./src/constants/twitter.ts). The interfaces are based off successful responses from the bookmarks API endpoint in Chrome DevTools and making (hopefully good) speculations.
 
 [Sequelize](https://sequelize.org/) is used to maintain the database schema, as well as save and retrieve bookmarked tweets, their respective authors, and the cursor to fetch the next set of bookmarks from.
 
