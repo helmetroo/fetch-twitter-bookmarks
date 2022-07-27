@@ -3,11 +3,11 @@
 **Interactive CLI application that fetches your Twitter bookmarks using a headless browser and saves them to a SQLite database**
 
 <a name="important"></a>
-# IMPORTANT
+# :warning: IMPORTANT
 
-**Twitter recently launched [v2 of their developer API](https://developer.twitter.com/en/docs/twitter-api/tweets/bookmarks/introduction), which provides an official means for you to fetch and manage your bookmarks. I'd strongly recommend using their official API over this application for your needs. I am not anticipating making major changes on this app going forward.**
+**Twitter recently launched [v2 of their developer API](https://developer.twitter.com/en/docs/twitter-api/tweets/bookmarks/introduction), which provides an official means for you to fetch and manage your bookmarks. I'd strongly recommend using their official API over this application for your needs. I am not anticipating making changes on this app going forward.**
 
-* **[Why build this?](#why)**
+* **[About](#about)**
 * **[Original goals](#goals)**
 * **[What's missing](#missing)**
 * **[How it works](#how-it-works)**
@@ -17,24 +17,19 @@
   * **[Running](#running)**
     * ***[Commands](#commands)***
     * ***[Arguments](#arguments)***
+    * ***[Notes](#notes)***
   * **[Logging](#logging)**
   * **[Database](#database)**
   * **[Testing](#testing)**
 * **[First approach](#first-approach)**
 * **[License](#license)**
 
-<a name="why"></a>
-# Why build this?
+<a name="About"></a>
+# About
 
-I originally created this app to solve a personal need for myself, which was to save my Twitter bookmarks locally in an offline database to read them later.
+I originally created this app to solve a personal need for myself, which was to save my Twitter bookmarks locally in an offline database to read them later, without relying on a non-existent (at the time) API to pull data from.
 
-My approach relied heavily on the idea that you can log in to Twitter via a headless browser, access the bookmarks page, and use an [API endpoint](#how-it-works) to pull bookmarks from (as of this writing, this approach still works).
-
-Without notice, and at any time, Twitter may change or revoke access to this aforementioned API endpoint, including the data available to you, as well as the contents and structure of said data. This would also have meant I would need to update the [schema](#database) more often than I do (which is hardly ever).
-
-When you use this app to login to Twitter, you'll more than likely receive login notifications like the ones I did with my account below. When you run [tests](#testing), you'll probably see several of these. If you login too frequently, Twitter may ask you to sign in with your username/phone only.
-
-![Login notifications](./images/login-notifications.png)
+My approach relied heavily on the idea that you could act as yourself by logging in via a headless browser, access the bookmarks page, and use an [API endpoint](#how-it-works) to pull bookmarks from.
 
 <a name="goals"></a>
 # Original goals
@@ -54,23 +49,24 @@ When you use this app to login to Twitter, you'll more than likely receive login
 # How it works
 1. Twitter's bookmarks page makes an HTTP GET request to an API endpoint matching this pattern:
 
-`https://twitter.com/i/api/graphql/$QUERY_ID/$OPERATION_NAME?variables=$QUERY_PARAMETERS`
+    `https://twitter.com/i/api/graphql/$QUERY_ID/$OPERATION_NAME?variables=$QUERY_PARAMETERS`
 
-For fetching bookmarks, `$OPERATION_NAME` will be `'Bookmarks'`. Both `$QUERY_ID` and `$OPERATION_NAME` are referenced in a specific object (below) inside a script loaded on the bookmarks page called `main.XXXXXXXXX.js`. These variables in the URL path are required to make successful calls to the API. Because playwright can listen for any network calls matching this URL pattern, we're able to avoid hunting for the necessary info in this script file.
+    For fetching bookmarks, `$OPERATION_NAME` will be `'Bookmarks'`. Both `$QUERY_ID` and `$OPERATION_NAME` are referenced in a specific object (below) inside a script loaded on the bookmarks page called `main.XXXXXXXXX.js`. These variables in the URL path are required to make successful calls to the API. Because playwright can listen for any network calls matching this URL pattern, we're able to avoid hunting for the necessary info in this script file.
 
-```javascript
-{queryId:"$QUERY_ID",operationName:"Bookmarks",operationType:"query"}
-```
+    ```javascript
+    {queryId:"$QUERY_ID",operationName:"Bookmarks",operationType:"query"}
+    ```
 
-The query parameter `variables` is url-encoded JSON, and represents the query parameters. For convenience, and to doubly make sure the tool presents like a browser to Twitter, the same parameters the bookmarks page already passes to the query are used, including request headers. There will be an option later to allow you to override a selection of these query parameters.
+    The query parameter `variables` is url-encoded JSON, and represents the query parameters. For convenience, and to doubly make sure the tool presents like a browser to Twitter, the same parameters the bookmarks page already passes to the query are used, including request headers. There will be an option later to allow you to override a selection of these query parameters.
 
-There are certain request headers the API seems to expect (i.e. an authorization token), which is the sole reason why the step of logging you in with a browser is necessary for the app to fetch data from this endpoint.
+    There are certain request headers the API seems to expect (i.e. an authorization token), which is the sole reason why the step of logging you in with a browser is necessary for the app to fetch data from this endpoint.
 
-A successful response returns the most recent bookmarks (the same ones you see when you first load the bookmarks page), as well as a cursor. The cursor is a marker to begin fetching the next set of bookmarks from. The most recent bookmarks from that first response will be saved, if the application doesn't have a cursor to fetch the next set of bookmarks from (which is the case if you're running it for the first time). This cursor also enables the application to resume fetching bookmarks from the last successful point in case an error is encountered, or if you decide to stop.
+    A successful response returns the most recent bookmarks (the same ones you see when you first load the bookmarks page), as well as a cursor. The cursor is a marker to begin fetching the next set of bookmarks from. The most recent bookmarks from that first response will be saved, if the application doesn't have a cursor to fetch the next set of bookmarks from (which is the case if you're running it for the first time). This cursor also enables the application to resume fetching bookmarks from the last successful point in case an error is encountered, or if you decide to stop.
 
 2. Using said response, [superagent](https://visionmedia.github.io/superagent/) then makes subsequent requests to the API URL, and fetches as many bookmarks as possible. An intentional delay of 300ms is added in between these subsequent responses to pretend like a human is scrolling through the bookmarks page; an option to change/remove that delay will be added later. Upon each successful response, the bookmarks and the next cursor are saved to the database.
 
-There will be an option later to let you set the cursor yourself, or begin fetching bookmarks from the beginning.
+<a name="how-to-use"></a>
+# How to use
 
 <a name="requirements"></a>
 ## Requirements
@@ -194,6 +190,13 @@ If you're running the app via npm, arguments are added after an extra set of das
 npm start -- -f $HOME/bookmarks.db
 ```
 
+<a name="notes"></a>
+### Notes
+
+When you use this app to login to Twitter, you'll more than likely receive login notifications like the ones I did with my account below. When you run [tests](#testing), you'll probably see several of these. If you login too frequently, Twitter may ask you to sign in with your username/phone only.
+
+![Login notifications](./images/login-notifications.png)
+
 <a name="logging"></a>
 ## Logging
 Network requests, and full details of internal errors not shown to you are saved to log files via [winston](https://github.com/winstonjs/winston).
@@ -201,7 +204,7 @@ The default location for logs is `$APP_ROOT/logs/debug.log`.
 
 <a name="database"></a>
 ## Database
-Bookmarked tweets, and available metadata for their respective authors, as well as the[#how-it-works](cursor) are saved in a SQLite database file. The default location of this database is the `$APP_ROOT/twitter-bookmarks.db`, although you can change this with the designated command-line arguments and commands above. You can explore the database with a [CLI tool](https://sqlite.org/cli.html) or [GUI](https://sqlitestudio.pl/).
+Bookmarked tweets, and available metadata for their respective authors, as well as the [cursor](#how-it-works) are saved in a SQLite database file. The default location of this database is the `$APP_ROOT/twitter-bookmarks.db`, although you can change this with the designated command-line arguments and commands above. You can explore the database with a [CLI tool](https://sqlite.org/cli.html) or [GUI](https://sqlitestudio.pl/).
 
 Definitions for the database schema for bookmarked tweets and their authors can be found in [tweets-db.ts](./src/client/tweets-db.ts).
 
@@ -229,7 +232,7 @@ npm test
 <a name="first-approach"></a>
 # First approach
 
-For my first approach at writing this app, I used [Puppeteer](https://pptr.dev/) to first visit the bookmarks page, then made it continuously scroll down and scrape encountered tweets. It assumed Twitter contained all tweets in `<article />` elements. More details on how that worked and the implementation for that approach can be found [here](https://github.com/helmetroo/fetch-twitter-bookmarks/tree/1232e7aa308e65e8b80f6fbf4bf928575194edf1). I decided that was far too unstable and the code was growing unnecessarily complex for its own good, so I rewrote it.
+For my first approach at writing this app, I used [Puppeteer](https://pptr.dev/) to first visit the bookmarks page, then made it continuously scroll down and scrape encountered tweets. It assumed Twitter contained all tweets in `<article />` elements. More details on how that worked, as well as the implementation can be found [here](https://github.com/helmetroo/fetch-twitter-bookmarks/tree/1232e7aa308e65e8b80f6fbf4bf928575194edf1). I decided that was far too unstable and the code was growing unnecessarily complex for its own good, so I rewrote it.
 
 <a name="license"></a>
 # License
