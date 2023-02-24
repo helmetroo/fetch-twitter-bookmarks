@@ -21,7 +21,7 @@
         "app-root-path": "^3.0.0",
         "lodash.uniqby": "^4.7.0",
         "playwright": "^1.11.1",
-        "sequelize": "^6.6.2",
+        "sequelize": "^6.29.0",
         "sqlite3": "^5.0.2",
         "superagent": "^6.1.0",
         "tiny-typed-emitter": "^2.0.3",
